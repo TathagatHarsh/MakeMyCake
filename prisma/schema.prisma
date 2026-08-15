@@ -1,0 +1,139 @@
+// Pricing is relational: a modifier belongs to a (component, size band) pair and
+// an order line item references a catalog item that must not drift. Joins and
+// foreign keys, not denormalised duplicates.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ComponentKind {
+  SHAPE
+  SIZE
+  SPONGE
+  FILLING
+  FROSTING
+  COVERAGE
+  FINISH
+  TOPPING
+  PLACEMENT
+  DELIVERY
+}
+
+/// The catalog a kitchen actually stocks. The pricing engine is the authority on
+/// money; this table is the authority on what exists and what it is called.
+model CatalogItem {
+  id        String        @id @default(cuid())
+  kind      ComponentKind
+  /// Matches the enum member in lib/schema.ts exactly.
+  slug      String
+  name      String
+  blurb     String
+  swatch    String?
+  /// Base price delta in paise, before the size multiplier.
+  deltaPaise Int          @default(0)
+  active    Boolean       @default(true)
+  sortOrder Int           @default(0)
+
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  orderItems OrderItem[]
+
+  @@unique([kind, slug])
+  @@index([kind, active])
+}
+
+enum OrderStatus {
+  draft
+  confirmed
+  in_kitchen
+  out_for_delivery
+  delivered
+  cancelled
+}
+
+enum PaymentStatus {
+  none
+  pending
+  paid
+  refunded
+  failed
+}
+
+model Design {
+  id        String   @id @default(cuid())
+  /// Short, unambiguous slug used by /d/[slug].
+  slug      String   @unique
+  config    Json
+  /// Cached so the gallery does not have to reprice on every render.
+  totalPaise Int
+  views     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  orders    Order[]
+
+  @@index([createdAt])
+}
+
+model Order {
+  id             String        @id @default(cuid())
+  /// Human-facing reference, e.g. MC-4471.
+  ref            String        @unique
+
+  config         Json
+  priceBreakdown Json
+  totalPaise     Int
+
+  status         OrderStatus   @default(draft)
+
+  /// Hook for auth later. Deliberately nullable — v1 has no login.
+  userId         String?
+  /// Hook for Razorpay later. Deliberately defaults to none — v1 takes no money.
+  paymentStatus  PaymentStatus @default(none)
+  payablePaise   Int
+
+  customerName   String?
+  customerPhone  String?
+  pincode        String?
+  deliverySlot   String
+  leadHours      Int
+
+  allergens      String[]
+  servesMin      Int
+  servesMax      Int
+
+  designId       String?
+  design         Design?       @relation(fields: [designId], references: [id])
+
+  items          OrderItem[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+/// One priced line on the docket, frozen at order time so a later catalog edit
+/// cannot rewrite history.
+model OrderItem {
+  id        String  @id @default(cuid())
+
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Null for lines that are not a catalog choice (labour, delivery, GST).
+  catalogItemId String?
+  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id])
+
+  label     String
+  kind      String
+  amountPaise Int
+  position  Int
+
+  @@index([orderId])
+}

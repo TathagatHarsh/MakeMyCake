@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/*
+ * The cake is the only saturated thing on screen. That principle is right and it
+ * stays. What went wrong was everything else: five neutrals within a few percent
+ * of each other, no tonal steps to build hierarchy out of, and one accent doing
+ * two contradictory jobs at once (it marked the total *and* it marked an error,
+ * so red meant both "this is your money" and "this is broken").
+ *
+ * Now: six neutrals with real distance between them, and the accent means one
+ * thing only — something is wrong and you need to look at it.
+ */
+@theme {
+  --color-ink: #17161a;
+  --color-graphite: #3f3d3a;
+  /* Body text on --slab: 7.1:1. Was 4.36:1 and failing. */
+  --color-steel: #55524b;
+  --color-slab: #e9e7e2;
+  --color-slab-deep: #dcd9d2;
+  --color-paper: #fdfcfa;
+
+  --color-rule: #cfccc4;
+  --color-rule-strong: #b3aea3;
+
+  /* The one accent. It means: blocked, or needs attention. Nothing else. */
+  --color-seal: #a8241b;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-martian), ui-monospace, "SFMono-Regular", monospace;
+
+  /*
+   * A type scale, because there was not one. The old app had eleven distinct
+   * hardcoded sizes between 9.5px and 15px, six of them uppercase monospace with
+   * wide tracking. Uppercase monospace destroys word-shape, which is the thing
+   * fast reading actually uses, and tracking it out destroys the word as a unit
+   * too. At 9.5px that is not a style, it is an eye test.
+   *
+   * Nothing below --text-micro exists any more, and --text-micro is allowed on
+   * the docket and nowhere else.
+   */
+  --text-micro: 0.6875rem;   /* 11px — docket labels, mono, sentence case */
+  --text-meta: 0.8125rem;    /* 13px — price deltas, captions */
+  --text-body: 0.9375rem;    /* 15px — blurbs, descriptions, paragraphs */
+  --text-item: 1.0625rem;    /* 17px — the name of a thing you can choose */
+  --text-lede: 1.125rem;     /* 18px — step subheads */
+
+  /*
+   * Motion. Everything eases out — things arriving should decelerate, because
+   * that is what arriving looks like. Nothing here is decorative; each duration
+   * is attached to a specific job in the comment where it is used.
+   */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.44, 1);
+  --dur-tap: 90ms;
+  --dur-ui: 180ms;
+  --dur-settle: 340ms;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-slab);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Bricolage is variable-width — tighten it at display sizes. */
+  /*
+   * Preflight resets heading weight to inherit, so every h1/h2/h3 in the app
+   * was rendering at 400 — and the 29 `font-500`/`font-700` classes dotted
+   * through the components were emitting nothing at all, because Tailwind v4
+   * has no bare-numeric weight utility. The whole product had exactly one
+   * typographic weight. Weight is the cheapest hierarchy signal there is and
+   * there was none of it; that is most of what "the readability" was.
+   */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-variation-settings: "wdth" 96;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-ink);
+    color: var(--color-paper);
+  }
+}
+
+@utility docket-leader {
+  /* Dotted leaders, the way a kitchen ticket runs a line to its price. */
+  background-image: radial-gradient(circle, var(--color-rule) 1px, transparent 1px);
+  background-position: bottom 3px left 0;
+  background-size: 5px 5px;
+  background-repeat: repeat-x;
+}
+
+@utility paper-edge {
+  box-shadow:
+    0 1px 0 rgb(0 0 0 / 0.04),
+    0 8px 24px -12px rgb(23 22 26 / 0.16);
+}
+
+@utility stamp {
+  color: var(--color-seal);
+  border: 3px double var(--color-seal);
+  transform: rotate(-7deg);
+  letter-spacing: 0.18em;
+  opacity: 0.86;
+}
+
+/*
+ * The cake used to sit on flat paper, which is why it read as a cut-out. A very
+ * shallow radial pool behind the canvas gives it a surface to sit on without
+ * adding a single triangle to the scene.
+ */
+@utility cake-stage {
+  /*
+   * Six of the nine frostings in the catalogue sit within a few percent of the
+   * page background, so a cream cake on cream had no silhouette at all — 1.18:1
+   * at the edge, which is not an edge. The falloff has to be steep enough that
+   * the widest part of the cake meets something visibly darker than itself.
+   *
+   * Not a dark stage: the whole product is paper and ink and a kitchen docket,
+   * and dropping a near-black panel into the middle of it would win the
+   * silhouette and lose the identity. A lit worktop does the same job.
+   */
+  background:
+    radial-gradient(100% 78% at 50% 34%, #fffefc 0%, #f4efe5 46%, #dcd4c4 78%, #c8bfad 100%);
+}
+
+/* Ticking a number over when it changes, so a price rise is felt, not just shown. */
+@keyframes price-tick {
+  0% { transform: translateY(-0.18em); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* An option acknowledging that it was the one you picked. */
+@keyframes chosen {
+  0% { transform: scale(1); }
+  42% { transform: scale(0.986); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

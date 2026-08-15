@@ -1,0 +1,13 @@
+# Local environment files must never reach a deployment. Vercel's own
+# environment variables are the only source of configuration in production.
+.env
+.env.*
+
+# Everything below is local-only noise.
+node_modules
+.next
+test-results
+playwright-report
+docs/demo
+docs/renders
+docs/screens
