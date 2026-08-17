@@ -12,6 +12,7 @@ import { formatINR } from "@/lib/format";
 import { DELIVERED_PHOTOS } from "@/lib/photos";
 import { priceCake } from "@/lib/pricing";
 import { canSubmit } from "@/lib/rules";
+import type { CakeConfig } from "@/lib/schema";
 import { encodeConfig } from "@/lib/share";
 import { deriveHandling, deriveServings } from "@/lib/servings";
 import { useConfig } from "@/lib/store";
@@ -27,7 +28,16 @@ type Stage =
 export default function ReviewStep() {
   const config = useConfig();
   const [stage, setStage] = useState<Stage>({ kind: "checking" });
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  /*
+   * The saved link and its slug belong to the design they were saved from, so
+   * the config is kept alongside them. The store replaces the config object on
+   * every change, so comparing it by reference during render is what makes a
+   * stale link disappear — no effect, and so no cascading render.
+   */
+  const [saved, setSaved] = useState<
+    { config: CakeConfig; slug: string; url: string } | null
+  >(null);
+  const share = saved?.config === config ? saved : null;
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
 
@@ -86,6 +96,10 @@ export default function ReviewStep() {
           clientTotal: price.total,
           customerName: name,
           customerPhone: phone,
+          // /api/orders has always resolved this to Order.designId. Nothing
+          // ever sent it, so saving a design and then ordering it produced two
+          // rows with nothing joining them.
+          designSlug: share?.slug,
         }),
       });
       const data = await res.json();
@@ -100,13 +114,34 @@ export default function ReviewStep() {
   }
 
   async function save() {
-    const res = await fetch("/api/designs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ config }),
-    });
-    const data = await res.json();
-    if (res.ok) setShareUrl(`${window.location.origin}${data.url}`);
+    try {
+      const res = await fetch("/api/designs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config }),
+      });
+      const data = await res.json();
+      /*
+       * There was no failure branch here at all. With no database attached —
+       * which is the documented state of the deployment — the endpoint answers
+       * 503 with a perfectly good explanation, and the button silently did
+       * nothing and said nothing. `place()` directly above has always handled
+       * this properly; this is the same shape.
+       */
+      if (!res.ok) {
+        setStage({
+          kind: "error",
+          message: data?.error ?? "That design couldn't be saved.",
+        });
+        return;
+      }
+      setSaved({ config, slug: data.slug, url: `${window.location.origin}${data.url}` });
+    } catch {
+      setStage({
+        kind: "error",
+        message: "That didn't send. Check your connection and try again.",
+      });
+    }
   }
 
   function download() {
@@ -282,9 +317,9 @@ export default function ReviewStep() {
         </button>
       </div>
 
-      {shareUrl && (
+      {share && (
         <p className="mt-3 break-all font-mono text-meta text-steel">
-          Shareable link: <a className="text-ink underline underline-offset-2" href={shareUrl}>{shareUrl}</a>
+          Shareable link: <a className="text-ink underline underline-offset-2" href={share.url}>{share.url}</a>
         </p>
       )}
 

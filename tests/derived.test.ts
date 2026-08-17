@@ -4,7 +4,7 @@ import { resolveSlot, servicePincode, zoneForPincode } from "@/lib/delivery";
 import { buildDocket, previewRef, renderSpecSheet } from "@/lib/docket";
 import { formatDelta, formatINR } from "@/lib/format";
 import { canSubmit } from "@/lib/rules";
-import { decodeConfig, encodeConfig } from "@/lib/share";
+import { decodeConfig, encodeConfig, makeOrderRef } from "@/lib/share";
 import { mulberry32, scatterDisc, seedFrom } from "@/lib/seed";
 import { CakeConfig, DEFAULT_CAKE, migrateConfig, type CakeConfig as Cfg } from "@/lib/schema";
 import { deriveHandling, deriveServings } from "@/lib/servings";
@@ -122,6 +122,21 @@ describe("share links", () => {
 
   it("produces URL-safe output", () => {
     expect(encodeConfig(cake())).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+});
+
+describe("order references", () => {
+  it("uses an alphabet a customer can read back down a phone line", () => {
+    // No O/0 and no I/l/1 — a reference gets read aloud and written down.
+    expect(makeOrderRef()).toMatch(/^MC-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/);
+  });
+
+  it("draws from a space large enough that the retry loop stays a backstop", () => {
+    // Order.ref is UNIQUE and /api/orders retries only five times. The old
+    // scheme had 9,000 possible values, so this many draws collided thousands
+    // of times and the constraint became a hard ceiling on the whole product.
+    const refs = new Set(Array.from({ length: 5000 }, makeOrderRef));
+    expect(refs.size).toBeGreaterThan(4990);
   });
 });
 

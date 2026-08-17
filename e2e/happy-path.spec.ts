@@ -70,7 +70,9 @@ test("a stranger can build a cake, be corrected, and get an order reference", as
   await page.getByLabel("Phone").fill("9876543210");
 
   await page.getByRole("button", { name: /^Place order/ }).click();
-  await expect(page.getByRole("heading", { name: /^Order MC-\d{4}$/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /^Order MC-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/ }),
+  ).toBeVisible();
 });
 
 test("undo puts back a choice the customer changed their mind about", async ({ page }) => {
