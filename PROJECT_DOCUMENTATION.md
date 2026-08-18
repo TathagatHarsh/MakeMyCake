@@ -16,9 +16,12 @@
 >
 > ### Revision — after the Supabase connection and the first round of fixes
 >
-> The app now runs against a live PostgreSQL database (Supabase), and three
-> defects this document originally reported — **C1**, **H1**, **H4** — have been
-> fixed and verified end to end. Fixed items are marked **✅ FIXED** inline and
+> The app now runs against a live PostgreSQL database (Supabase), and four
+> defects this document originally reported — **C1**, **H1**, **H4** and **H6** —
+> have been fixed and verified end to end. H6 was the largest: orders are now
+> readable and advanceable through a gated staff board at `/kitchen`, so the
+> product can finally fulfil what it takes.
+> Fixed items are marked **✅ FIXED** inline and
 > the original finding is left in place rather than deleted: the finding is *why*
 > the code looks the way it does, and a reader arriving at the diff needs both
 > halves.
@@ -32,7 +35,7 @@
 > before any of this work began.
 >
 > **Full suite status at revision:** `tsc --noEmit` clean · `eslint` clean ·
-> `npm test` 63 passed · `npm run e2e` 6 passed · `npm run a11y` 10 passed ·
+> `npm test` 69 passed · `npm run e2e` 6 passed · `npm run a11y` 11 passed ·
 > `npm run visual` 6 passed · `next build` succeeds.
 
 **Legend used throughout**
@@ -285,8 +288,10 @@ The order reference on screen is the only artifact the customer keeps.
 | Frozen line items | Price lines copied onto the order so catalogue edits cannot rewrite history | — | ✅ | `orders/route.ts:118-125` | |
 | Link order → saved design | `designSlug` sent by the client, resolved to `designId` | — | ✅ | `orders/route.ts:93-95,117`, `review/page.tsx` `place()` | **H4 ✅ FIXED.** The server always supported this; the client never sent it, so every `Order.designId` was `null`. The slug is now stored alongside the config it was saved from and only sent while that config is still current |
 | `OrderItem.catalogItemId` | FK from a docket line to the catalogue row | — | 🟥 | `schema.prisma:129-131` | Never populated. Always `null`, contradicting the schema's own comment |
-| Order status lifecycle | `draft → confirmed → in_kitchen → out_for_delivery → delivered` | Staff | 📋 | `schema.prisma:50-57` | Enum exists. Every order is created `draft` and nothing ever advances it |
-| Order retrieval | Look up an order by reference | Anyone | 📋 | — | **No GET endpoint exists.** Once the tab closes, the order is unreachable from the app |
+| Order status lifecycle | `draft → confirmed → in_kitchen → out_for_delivery → delivered`, plus `cancelled` from any open state | Staff | ✅ | `lib/orders.ts`, `app/kitchen/actions.ts` | **H6 ✅.** Forward-only; re-checked server-side, so a stale page cannot skip steps |
+| Staff order board | Every docket newest-first, filterable, with the spec sheet and advance buttons | Staff | ✅ | `app/kitchen/page.tsx`, `proxy.ts` | **H6 ✅.** HTTP Basic, fails closed when unconfigured |
+| Order notification | Tell the kitchen an order arrived | Staff | 📋 | — | Not started. Needs an email/SMS provider; staff must watch the board |
+| Customer order lookup | Look up your own order by reference | Visitor | 📋 | — | No customer-facing GET. Once the tab closes, the customer has only the reference |
 | Graceful no-DB mode | Honest 503 with a human message instead of a stack trace | Visitor | ✅ | `lib/db.ts:15-17,41-43` | Designing/pricing still works with no database |
 
 ### 4.7 3D rendering
@@ -330,10 +335,10 @@ The order reference on screen is the only artifact the customer keeps.
 
 | Feature | Command | Count | Files |
 |---|---|---|---|
-| Unit tests (pricing, rules, derived) | `npm test` | 63 tests across 3 files (15 + 17 + 31) | `tests/*.test.ts` |
+| Unit tests (pricing, rules, derived) | `npm test` | 69 tests across 4 files (15 + 17 + 31 + 6) | `tests/*.test.ts` |
 | End-to-end happy path | `npm run e2e` | 6 tests | `e2e/happy-path.spec.ts` |
 | Visual regression baselines | `npm run visual` | 6 screenshots | `e2e/visual.spec.ts`, `e2e/snapshots/` |
-| Accessibility sweep | `npm run a11y` | 10 tests | `e2e/a11y.spec.ts` |
+| Accessibility sweep | `npm run a11y` | 11 tests | `e2e/a11y.spec.ts` |
 | Bundle budget measurement | `npm run budget` | — | `scripts/budget.ts` |
 | Screenshot / demo capture | `npm run shot`, `shoot`, `demo` | — | `scripts/shoot*.ts`, `scripts/demo.ts` |
 | Type check / lint | `npm run typecheck`, `npm run lint` | — | `tsconfig.json`, `eslint.config.mjs` |
@@ -345,7 +350,7 @@ The order reference on screen is the only artifact the customer keeps.
 | **Authentication** | 📋 Not started | No auth library, no session, no middleware, no login route. `Order.userId` hardcoded `null` (`orders/route.ts:107`) |
 | **User management** | 📋 Not started | No `User` model in `prisma/schema.prisma` |
 | **Dashboard** | 📋 Not started | No route renders a list of anything a user owns |
-| **Admin functionality** | 📋 Not started | No admin route, no order list, no catalogue editor |
+| **Admin functionality** | 🟨 Partial | `/kitchen` lists and advances orders (H6 ✅). Still no catalogue editor, no per-person staff identity, no audit trail |
 | **Notifications** | 📋 Not started | No email, SMS, or webhook code. `pg` is the only outbound integration |
 | **Payments** | 📋 Not started | `PaymentStatus` enum + `payablePaise` exist as hooks; Razorpay named only in a comment (`schema.prisma:95`). No SDK in `package.json` |
 | **Analytics** | 📋 Not started | No analytics SDK. `Design.views` is incremented but never read |
@@ -411,7 +416,7 @@ components/
 |---|---|---|
 | Runtime | Next.js Route Handlers on Node (Prisma + `pg` require Node, not Edge) | `app/api/*/route.ts` |
 | API style | Three `POST`-only JSON endpoints. **No REST resource semantics, no GET, no server actions** | §8 |
-| Middleware | **None.** No `middleware.ts` exists anywhere | verified by file listing |
+| Middleware | `proxy.ts` — HTTP Basic on `/kitchen/:path*` only. (Next 16 deprecates the `middleware.ts` filename in favour of `proxy.ts`; the build warns if you use the old one.) Nothing else is intercepted | `proxy.ts` |
 | Authentication | **None** | §9 |
 | Authorization | **None** | §9 |
 | Validation | Zod `safeParse` at every boundary, plus hand-written name/phone regexes | `orders/route.ts:30-57` |
@@ -593,11 +598,13 @@ server. **On the client it is weaker** — see the silent `save()` failure in §
 | `/d/new?c=…` | `app/d/new/page.tsx` | A design carried entirely in the URL | None | Public | Server Component (async) | `decodeConfig` | ✅. `robots: noindex` |
 | `/lab` | `app/lab/page.tsx` → `LabGrid.tsx` | 12 extreme cakes side by side; auto-rotate + cut toggles | None | Developer tool | Client | `LAB_CONFIGS`, `priceCake`, `validateCake` | ✅. `noindex`, but publicly reachable |
 | `/lab/[index]` | `app/lab/[index]/page.tsx` → `LabSolo.tsx` | One cake, large — the squint test | None | Developer tool | Server + Client | `LAB_CONFIGS`; `generateStaticParams` for all 12 | ✅ |
+| `/kitchen` | `app/kitchen/page.tsx` | **Staff board.** Every docket newest-first, filterable by status, with the spec sheet and status-advance buttons | **HTTP Basic** via `proxy.ts` | Kitchen staff | Server Component, `force-dynamic` | `db.order.findMany` + `groupBy`, `renderSpecSheet`, `lib/orders` | ✅ `noindex` |
 | `*` (404) | `app/not-found.tsx` | 404 with a route back to the builder | None | Public | Server | — | ✅ |
 
 **Route-level observations**
 
-- **No route is protected.** There is no `middleware.ts` and no guard in any layout.
+- **Only `/kitchen` is protected**, by HTTP Basic in `proxy.ts`. No layout-level guard
+  exists anywhere, and no other route is gated.
 - `/lab` and `/lab/[index]` are internal tooling exposed on the public origin. `noindex`
   keeps them out of search results; it does not keep anyone out.
 - `/build/*` steps are all `"use client"` and gated on hydration by `BuilderShell`,
@@ -679,8 +686,19 @@ Three route handlers. All `POST`. All unauthenticated. No `GET`, `PUT`, `PATCH` 
 
 ## 9. Authentication & Permissions
 
-**There is no authentication system in this repository.** This section documents that
-absence precisely, because the schema contains hooks that could be mistaken for one.
+**There is no *customer* authentication system in this repository**, and the schema
+contains hooks that could be mistaken for one. There is now exactly one gate: HTTP Basic
+on the staff board at `/kitchen`, added with H6.
+
+| | Customers | Kitchen staff |
+|---|---|---|
+| Sign up | ✗ none | ✗ none — one shared credential |
+| Log in | ✗ none | ✓ browser Basic prompt (`proxy.ts`) |
+| Session | ✗ none | Browser-held Basic credentials |
+| Identity | Name + phone typed at checkout, never verified | None per person |
+| Roles | ✗ none | ✗ none — the gate is binary |
+
+The rest of this section documents the customer-facing absence precisely.
 
 ### How users sign up
 They do not. There is no signup route, no `User` model, no password handling, no
@@ -707,8 +725,13 @@ in practice, so this is a reasonable capability-URL model.
 They are not. There is no role field, no claim, no check.
 
 ### How protected routes work
-No route is protected. There is no `middleware.ts`, no layout-level guard, and no
-`redirect()` on an auth condition anywhere.
+Exactly one route is protected: `/kitchen/:path*`, by HTTP Basic in `proxy.ts`. The gate
+**fails closed** — with `KITCHEN_USER`/`KITCHEN_PASSWORD` unset it answers `503` rather
+than opening, verified against correct credentials on an unconfigured server. Everything
+else is unguarded: no layout-level check and no `redirect()` on an auth condition.
+
+Because a server action posts back to the page it lives on, the same matcher covers the
+status-transition writes — the board cannot be driven by an unauthenticated POST.
 
 ### How authorization is enforced
 It is not, because there is nothing to authorize — no resource in the system has an
@@ -719,7 +742,7 @@ owner. `Order.userId` is declared nullable and written as a literal `null`
 
 | # | Concern | Severity | Detail |
 |---|---|---|---|
-| 1 | **Unauthenticated write endpoints with no rate limiting** | 🔴 | `/api/orders` and `/api/designs` create rows for anyone, unlimited. A trivial script fills the orders table and the design table. There is no CAPTCHA, no throttle, no origin check, no `middleware.ts` |
+| 1 | **Unauthenticated write endpoints with no rate limiting** | 🔴 | `/api/orders` and `/api/designs` create rows for anyone, unlimited. A trivial script fills the orders table and the design table. No CAPTCHA, no throttle, no origin check. `proxy.ts` now exists for the kitchen gate but its `matcher` covers only `/kitchen/:path*`, so these two are still wide open |
 | 2 | **PII stored with no access control on the write path** | 🟠 | `customerName` + `customerPhone` (`schema.prisma:99-100`) are written by an open endpoint. Mitigating factor: there is **no read endpoint**, so the API cannot leak them back out — but the database holds unverified personal data from anonymous submitters |
 | 3 | **No proof of identity on an order** | 🟠 | Nothing verifies the phone number. Orders can be placed in another person's name and number. The kitchen's phone call is the only real check |
 | 4 | **No security headers** | 🟡 | `next.config.ts` sets no CSP, `X-Frame-Options`, HSTS or Referrer-Policy |
@@ -777,6 +800,8 @@ project/account owns it.
 |---|---|---|---|
 | `DATABASE_URL` | **Required for orders and saved designs.** Optional for everything else | PostgreSQL connection string for the Prisma `pg` adapter. ⚠️ Against Supabase this needs a specific host, port **and** `sslmode` — see *Database configuration* below before setting it | `lib/db.ts:16,20`, `prisma/seed.ts:13`, `prisma.config.ts:13` |
 | `NEXT_PUBLIC_FSSAI_LICENCE` | Optional | The bakery's real FSSAI food-safety licence number. When set, the line appears on the docket, spec sheet and footer. Deliberately has **no default** so no invented registration is ever printed | `lib/docket.ts:15` |
+| `KITCHEN_USER` | **Required for `/kitchen`** | Username for the staff board's HTTP Basic gate | `proxy.ts`, `playwright.config.ts` |
+| `KITCHEN_PASSWORD` | **Required for `/kitchen`** | Password for the same. **Unset means the route returns 503, not open access** — the board lists customer names and phone numbers, so the gate fails closed | `proxy.ts`, `playwright.config.ts` |
 | `E2E_PORT` | Optional (default `3100`) | Port for the Playwright web server | `playwright.config.ts:3` |
 | `CI` | Optional | Enables 1 retry and disables server reuse in Playwright | `playwright.config.ts:9,44` |
 | `SHOT_URL` | Optional | Base URL for `scripts/shoot.ts` (default `:3001`), `shoot-message.ts` (`:3000`), `budget.ts` (`:3100`) | those files |
@@ -899,6 +924,9 @@ Tripee/                                (repo root; the project is "makemycake")
 │   ├── d/
 │   │   ├── [slug]/page.tsx            DB-backed shared design
 │   │   └── new/page.tsx               URL-carried design
+│   ├── kitchen/                       ★ staff board — the only reader of orders
+│   │   ├── page.tsx                   list, filter, spec sheet, advance buttons
+│   │   └── actions.ts                 server action: one guarded status transition
 │   ├── presets/page.tsx               preset gallery
 │   └── lab/                           internal render lab (noindex)
 │       ├── page.tsx  LabGrid.tsx  configs.ts
@@ -914,6 +942,7 @@ Tripee/                                (repo root; the project is "makemycake")
 │   ├── docket.ts                      docket model + plain-text spec sheet
 │   ├── catalog.ts                     option metadata, blurbs, swatches, STEPS
 │   ├── presets.ts                     8 finished designs
+│   ├── orders.ts                      ★ order status machine (forward-only)
 │   ├── store.ts                       Zustand + zundo + sessionStorage
 │   ├── view.ts                        ephemeral view state (slice, composing)
 │   ├── share.ts                       base64url encode/decode, slug, order ref
@@ -936,7 +965,7 @@ Tripee/                                (repo root; the project is "makemycake")
 │   └── seed.ts                        catalogue + presets upsert
 │       (NOTE: no migrations/ directory)
 │
-├── tests/                             Vitest, node env, 63 tests
+├── tests/                             Vitest, node env, 69 tests
 │   ├── pricing.test.ts  rules.test.ts  derived.test.ts
 ├── e2e/                               Playwright
 │   ├── happy-path.spec.ts  a11y.spec.ts  visual.spec.ts
@@ -944,6 +973,7 @@ Tripee/                                (repo root; the project is "makemycake")
 ├── scripts/                           tsx CLIs: docket, budget, shoot*, demo, slicetest
 ├── docs/                              SESSION-SUMMARY.md + demo/renders/screens PNGs
 ├── public/                            5 unused Next starter SVGs
+├── proxy.ts                           ★ HTTP Basic gate on /kitchen (fails closed)
 └── (config) next.config.ts · tsconfig.json · eslint.config.mjs ·
             vitest.config.mts · playwright.config.ts · prisma.config.ts ·
             postcss.config.mjs · .vercelignore · .claude/launch.json
@@ -1002,7 +1032,8 @@ reference — is now structurally impossible, because real references contain le
 
 **C2 — Unauthenticated, unthrottled write endpoints. STILL OPEN.**
 `/api/orders` and `/api/designs` accept unlimited anonymous writes with no rate limit,
-CAPTCHA, or origin check, and there is no `middleware.ts`. A single script can fill the
+CAPTCHA, or origin check. `proxy.ts` exists now but its `matcher` covers only
+`/kitchen/:path*`, so extending it is the obvious fix. A single script can fill the
 `Order` table (with PII fields) and the `Design` table.
 
 The denial-of-service half of this finding is gone now that C1 is fixed — junk orders no
@@ -1105,10 +1136,53 @@ the one on screen.
 which does not exist. The workflow is `prisma db push`. There is no reviewed, ordered,
 reversible path to change the schema of a database that already holds orders.
 
-**H6 — Orders have no lifecycle and no reader.** Every order is created `status: "draft"`
-and nothing ever advances it. There is no GET endpoint, no admin page, and no
-notification, so a placed order is invisible to everyone including the kitchen. The
-`OrderStatus` enum's other five values are unreachable.
+**H6 — ✅ FIXED — Orders had no lifecycle and no reader.**
+
+*Original finding.* Every order was created `status: "draft"` and nothing ever advanced
+it. There was no GET endpoint, no admin page and no notification, so a placed order was
+invisible to everyone including the kitchen — the `OrderStatus` enum's other five values
+were unreachable. This was the gap between the product being a demo and a business.
+
+*Fix — three pieces.*
+
+1. **`lib/orders.ts`** — the status machine, as pure functions beside the other business
+   logic. `NEXT_STATUS` encodes the sequence the schema always described but nothing
+   enforced; `canTransition` is the guard; `STATUS_LABEL` and `ACTION_LABEL` name the
+   states in the bakery's voice. A type-only import of `OrderStatus` keeps the file
+   runtime-free while leaving the schema as the single source of truth for the names.
+2. **`app/kitchen/page.tsx`** — the board. Every docket newest-first, filterable by
+   status, showing customer, phone, placed time, delivery slot and lead hours, pincode,
+   servings and derived allergens, with the **existing** `renderSpecSheet` output in a
+   `<details>`. It renders that rather than a second summary because a second summary is
+   how two descriptions of the same cake drift apart.
+3. **`proxy.ts`** — HTTP Basic, credentials from `KITCHEN_USER` / `KITCHEN_PASSWORD`.
+
+*Why Basic rather than an auth library.* There is no `User` model, no session and no
+signup; introducing all three to put a password on one staff page is a large amount of
+machinery for a single bakery. The browser already knows how to prompt. **The ceiling is
+explicit:** one shared credential, no per-person identity, no audit of who advanced which
+docket. That is the seam to replace when staff need telling apart — nothing else changes.
+
+*Three properties worth keeping when this is rewritten.*
+
+- **The gate fails closed.** With `KITCHEN_USER`/`KITCHEN_PASSWORD` unset the route
+  answers `503`, not `200`. Verified: even *correct* credentials get `503` on an
+  unconfigured deployment, and no customer data appears in the body. "If no password is
+  set, skip the check" would have turned one forgotten variable into a public page of
+  phone numbers.
+- **The transition is re-checked server-side.** The board only renders legal buttons, but
+  a form is not the only thing that can post and a page left open on a counter goes
+  stale. Verified by tampering a hidden input to jump `confirmed → delivered`: the write
+  was refused and logged as `rejected_status_transition`.
+- **Nothing moves backwards.** A cake that has left the kitchen cannot be un-baked.
+
+*Verified.* Order `MC-SZQME9` is the first in this project's history to move past
+`draft`. 6 new unit tests in `tests/orders.test.ts`; `/kitchen` added to the accessibility
+sweep (11 routes, zero violations) with credentials supplied via `playwright.config.ts`.
+
+*Still missing, deliberately.* No notification on order creation — that needs an email or
+SMS provider, a new dependency and new credentials, and is a separate decision. Staff must
+currently look at the board. There is also no customer-facing "track my order" lookup.
 
 **H7 — No CI.** Four good test suites and nothing runs them automatically. No `.github/`,
 no pipeline config anywhere.
@@ -1209,8 +1283,7 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 
 | Risk | Likelihood | Impact | Priority |
 |---|---|---|---|
-| **Placed orders never reach the kitchen** | Certain — there is no reader | Orders silently lost | 🟠 **H6 — now the top open risk** |
-| Abuse of open write endpoints | High once public | DB flooding, PII spam | 🔴 C2 |
+| Abuse of open write endpoints | High once public | DB flooding, PII spam | 🔴 **C2 — now the top open risk** |
 | Unencrypted client can reach the database | Medium | Password + PII in cleartext | 🟠 S2 |
 | Schema change on a live DB with no migrations | Medium — **rose sharply**, the DB now holds rows | Data loss | 🟠 H5 |
 | Catalogue drift between code and DB | Medium | Confusing, currently inert | 🟠 H2/H3 |
@@ -1218,6 +1291,7 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 | ~~Order reference collision / exhaustion~~ | — | — | ✅ C1 fixed |
 | ~~Silent "Save & share" failure~~ | — | — | ✅ H1 fixed |
 | ~~Tables readable via the anon key~~ | — | — | ✅ S1 fixed |
+| ~~Placed orders never reach the kitchen~~ | — | — | ✅ H6 fixed |
 
 ---
 
@@ -1241,7 +1315,7 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 - Accessibility work: radiogroup semantics, live region, labelled 3D pane, reduced
   motion, verified by an axe sweep over 9 routes.
 - Adaptive 3D quality and GPU resource disposal.
-- Four test suites, **all green**: 63 unit tests, 6 E2E, 6 visual baselines, 10 a11y.
+- Four test suites, **all green**: 69 unit tests, 6 E2E, 6 visual baselines, 11 a11y.
 
 ### 🟨 Partially implemented
 
@@ -1503,8 +1577,9 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 - **Data created:** One `Order`, N `OrderItem` rows.
 - **Dependencies:** `app/api/orders/route.ts`, `lib/db.ts`, Postgres.
 - **Status:** 🟨 Partial — C1 (reference exhaustion) and H4 (`designId` never linked) are
-  fixed and verified against a live database. Still partial for one reason only: **H6 —
-  nobody can read the order afterwards.**
+  fixed and verified against a live database, and **H6** is fixed too — orders are
+  readable and advanceable at `/kitchen`. The remaining gap is notification: nothing
+  tells the kitchen an order has arrived, so someone has to look at the board.
 
 #### FR-11 — Save and share a design
 
@@ -1573,7 +1648,7 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 | **Scalability** | Design slugs must not collide (31⁷, probed before insert) | `lib/share.ts:27` | Code |
 | **Scalability** | Order references must not collide (31⁶ ≈ 8.9 × 10⁸) | `lib/share.ts` `makeOrderRef` | ✅ `tests/derived.test.ts` |
 | **Scalability** | Prisma client is singleton-cached across hot reloads | `lib/db.ts:4,27-32` | Code |
-| **Accessibility** | WCAG 2.1 AA, zero violations across 9 routes | `e2e/a11y.spec.ts` | axe-core |
+| **Accessibility** | WCAG 2.1 AA, zero violations across 10 routes | `e2e/a11y.spec.ts` | axe-core |
 | **Accessibility** | The whole builder is drivable by keyboard alone | `e2e/a11y.spec.ts:39-63` | E2E test |
 | **Accessibility** | Single-select groups are radiogroups with roving tabindex | `OptionGrid.tsx:71-86` | Code + test |
 | **Accessibility** | The 3D pane has a prose description for non-visual users | `BuilderShell.tsx:95-103` | Code |
@@ -1964,7 +2039,7 @@ sequenceDiagram
 | `app/build/review/page.tsx` | The whole conversion surface | 356 lines; the busiest component. Contains H1 and H4 |
 | `app/globals.css` | Tailwind v4 `@theme` — every design token | There is no `tailwind.config.js`; this is the design system |
 | `prisma/seed.ts` | Catalogue + preset upsert | Derives catalogue prices from the pricing engine |
-| `tests/*.test.ts` | 63 tests over the pure logic | The executable specification of the business rules |
+| `tests/*.test.ts` | 69 tests over the pure logic | The executable specification of the business rules |
 | `e2e/happy-path.spec.ts` | The journey, asserted | The best single description of intended behaviour |
 | `e2e/visual.spec.ts` + `e2e/snapshots/` | Committed pixel baselines | Any unintended render change fails here |
 | `scripts/docket.ts` | Terminal docket printer | Fastest way to exercise pricing + rules |
@@ -2067,9 +2142,12 @@ See §16. If you only get through three: `lib/schema.ts`, `lib/pricing.ts`, `lib
 `lib/photos.ts` is empty on purpose; the FSSAI line is opt-in on purpose.
 
 **Genuinely unfinished:**
-- **Any way to read an order back (H6)** — no GET, no admin, no notification. Now the
-  largest gap by a distance.
-- Rate limiting on the two public write endpoints (C2).
+- Rate limiting on the two public write endpoints (C2) — now the largest open item.
+- Notification when an order arrives. The board exists; nothing tells anyone to look at
+  it. Needs an email/SMS provider, so it was left out of H6 rather than half-built.
+- Per-person staff identity. The kitchen gate is one shared credential, so there is no
+  audit of who advanced which docket.
+- A customer-facing "track my order" lookup.
 - `CatalogItem` as a live catalogue (H2) and its FK into `OrderItem` (H3).
 - Migrations (H5) — more urgent than it was, because the database now holds rows.
 - CI (H7).
@@ -2078,22 +2156,19 @@ See §16. If you only get through three: `lib/schema.ts`, `lib/pricing.ts`, `lib
 - The bundt render and the two-tier heart ratio (documented by the previous author).
 
 **Done since the original audit:** C1 (order reference), H1 (silent save failure),
-H4 (`designId` linkage), S1 (RLS).
+H4 (`designId` linkage), S1 (RLS), H6 (the kitchen board).
 
 ### 8. What to fix first
 
 *Revised. C1, H1, H4 and S1 are done; what follows is what remains, reordered.*
 
-1. **H6 — make orders reachable.** This is now the top item by a wide margin. There are
-   orders in the database and the only way to see one is raw SQL: no GET endpoint, no
-   admin page, no notification, and every row still `status: draft` because nothing
-   advances it. Until this exists the product can take orders but cannot fulfil them.
-   It is also where the authentication question gets forced, since a staff view needs
-   some gate — which makes it the natural place to start the missing back half rather
-   than a detour from it.
-2. **C2 — rate-limit the two write endpoints.** Even a crude IP-bucketed limit in a new
-   `middleware.ts` closes the flooding and PII-spam vector. Do this before any public
-   deployment.
+1. **C2 — rate-limit the two write endpoints.** Now the top item. `proxy.ts` already
+   exists for the kitchen gate, so an IP-bucketed limit has a home; extend its `matcher`
+   to `/api/orders` and `/api/designs`. Do this before any public deployment.
+2. **Notify the kitchen when an order arrives.** The board exists but nobody is told to
+   look at it, so a 2am order waits until someone opens the page. This needs an email or
+   SMS provider — a new dependency and new credentials — which is why it was left out of
+   H6 rather than half-built.
 3. **S2 — re-enable SSL enforcement.** A dashboard toggle. The app already complies, so
    it costs nothing and backstops every future client.
 4. **H5 — adopt migrations.** This climbed: `prisma db push` reconciles by dropping, and
@@ -2155,7 +2230,7 @@ Three things I would want to know on day one:
    you a schema that pushes cleanly and an application that cannot connect — because
    migration and runtime use two different drivers with different SSL behaviour.
 3. **Trust the tests, not the README.** The README is honest and mostly accurate, but the
-   63 unit tests and the six E2E tests are the specification. When the two disagree,
+   69 unit tests and the six E2E tests are the specification. When the two disagree,
    the tests are right.
 
 And one cultural note: the previous author refused to ship an invented FSSAI number and
@@ -2187,14 +2262,17 @@ Nine-step builder (one URL each) · live procedural 3D preview · cutaway slice 
 live pricing with per-option deltas · server-verified pricing · 12 compatibility rules
 with one-tap fixes · derived allergens, servings, handling, delivery lead times · order
 docket (screen + downloadable text + CLI) · undo/redo + refresh persistence · save-and-
-share short links and URL-carried designs · 8-preset gallery · adaptive 3D quality ·
+share short links and URL-carried designs · 8-preset gallery · gated staff board with a
+forward-only order lifecycle · adaptive 3D quality ·
 tested WCAG 2.1 AA accessibility.
 
 **Main user flow**
 Landing → `/build/shape` → eight further steps (3D + docket live throughout) → `/build/review`
 → server price confirmation → name + phone → `POST /api/orders` → `MC-XXXXXX` reference +
 downloadable docket. No payment, no login. Side exits: save to `/d/<slug>`, or carry the
-whole design in `/d/new?c=…`. **The flow ends there** — nothing downstream reads the order.
+whole design in `/d/new?c=…`. The docket then appears on the staff board at `/kitchen`,
+where it is advanced `draft → confirmed → in_kitchen → out_for_delivery → delivered`.
+**Nothing announces its arrival**, so someone has to be looking.
 
 **Tech stack**
 Next.js 16.2.12 (App Router) · React 19.2.4 · TypeScript strict · Tailwind CSS v4
@@ -2222,8 +2300,10 @@ exposure while leaving Prisma (connecting as table owner) unaffected. See §10 f
 connection traps.
 
 **Authentication**
-**None.** No login, no session, no roles, no `middleware.ts`, no protected route. Hooks
-only: `Order.userId` is nullable and always written `null`.
+**None for customers** — no login, no session, no roles; `Order.userId` is a hook, always
+written `null`. **Staff** reach `/kitchen` through HTTP Basic in `proxy.ts`, one shared
+credential from `KITCHEN_USER`/`KITCHEN_PASSWORD`, failing closed when unset. No
+per-person identity and no audit of who advanced which docket.
 
 **External services**
 PostgreSQL (optional at runtime). Google Fonts via `next/font` (self-hosted at build).
@@ -2249,15 +2329,15 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
 | Builder UX, accessibility, testing | ~95% |
 | Sharing | ~100% (H1 fixed) |
 | Order capture | ~95% (C1 and H4 fixed; verified end to end against a live database) |
-| Order *fulfilment* — reading, status, notification, admin | **0%** |
-| Authentication / payments / analytics / notifications | **0%** (hooks only) |
-| **Overall, as a shippable business** | **~65–70%** — the customer-facing half is finished to a high standard and now provably works against real infrastructure; the operational half still does not exist |
+| Order *fulfilment* — reading, status, staff board | ~80% (H6) — readable and advanceable; no notification, no per-person identity |
+| Customer authentication / payments / analytics | **0%** (hooks only) |
+| **Overall, as a shippable business** | **~80%** — the customer-facing half was already finished to a high standard; the operational half now exists in its minimum honest form. What is left is mostly hardening (C2, S2, H5, CI) and one product decision: how the kitchen gets told |
 
 **Biggest technical risks**
-1. 🟠 **Orders are write-only.** Nothing reads them, nothing advances `status` past
-   `draft`, nobody is notified. The business risk, not just a technical one.
-2. 🔴 Unauthenticated, unthrottled write endpoints — DB flooding and PII spam, now
-   pointed at a real database.
+1. 🔴 Unauthenticated, unthrottled write endpoints — DB flooding and PII spam, now
+   pointed at a real database. `proxy.ts` exists now, so this has an obvious home.
+2. 🟠 **Nobody is told an order arrived.** The board exists and is read-only until
+   someone opens it, so a 2am order waits for whoever looks first.
 3. 🟠 No migration history against a schema that now stores real orders — `db push`
    reconciles by dropping.
 4. 🟠 SSL enforcement disabled on the database (S2); the app is unaffected, any careless
@@ -2267,11 +2347,12 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
 7. 🟡 The docket↔pricing string-prefix coupling, untested and silently lossy.
 
 *Resolved since the original audit:* order-reference exhaustion (C1), silent save failure
-(H1), unlinked designs (H4), tables exposed via the anon key (S1).
+(H1), unlinked designs (H4), tables exposed via the anon key (S1), and orders being
+write-only (H6).
 
 **Biggest product gaps**
-1. A placed order reaches nobody: no reader, no admin, no notification. Every order is
-   `draft` forever.
+1. A placed order is now readable and advanceable, but **nothing announces it**. The
+   bakery must remember to look at `/kitchen`.
 2. No authentication, so no order history and no returning-customer story.
 3. No payments — deliberate for v1, but the hooks are the only work done.
 4. Persistence is `sessionStorage`: close the tab and twenty minutes of work is gone.
@@ -2280,10 +2361,10 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
 6. Two known render/product gaps: the bundt and the two-tier heart.
 
 **Recommended next steps** (in order)
-1. **Give orders a reader.** Minimum: a token-protected list endpoint. Properly: a staff
-   view plus a notification on creation, and something that advances `status` past
-   `draft`. This is the whole remaining product, and it forces the auth decision.
-2. Add `middleware.ts` rate limiting to `/api/orders` and `/api/designs`.
+1. Add rate limiting to `/api/orders` and `/api/designs` by extending the `matcher` in
+   `proxy.ts`, which already exists for the kitchen gate.
+2. **Notify the kitchen when an order arrives** — email or SMS. The board is useless
+   until someone knows to open it, and this is the last piece of the fulfilment loop.
 3. Re-enable SSL enforcement in the Supabase dashboard (S2).
 4. Adopt Prisma migrations before the next schema change — the database has rows now.
 5. Wire the four green suites into CI, remembering `npx playwright install chromium`.

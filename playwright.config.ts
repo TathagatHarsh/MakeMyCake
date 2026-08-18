@@ -1,6 +1,12 @@
+// The kitchen board sits behind HTTP Basic, and the credentials live in .env
+// alongside DATABASE_URL. Playwright does not read .env on its own.
+import "dotenv/config";
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100);
+
+const KITCHEN_USER = process.env.KITCHEN_USER;
+const KITCHEN_PASSWORD = process.env.KITCHEN_PASSWORD;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,6 +33,12 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     viewport: { width: 1440, height: 900 },
     trace: "retain-on-failure",
+    // Sent only when a route actually challenges, so the public pages are
+    // exercised exactly as an anonymous visitor sees them.
+    httpCredentials:
+      KITCHEN_USER && KITCHEN_PASSWORD
+        ? { username: KITCHEN_USER, password: KITCHEN_PASSWORD }
+        : undefined,
     // SwiftShader, so WebGL works on a machine with no GPU available to the
     // headless browser. The builder is unusable without it.
     launchOptions: {
