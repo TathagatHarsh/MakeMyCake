@@ -31,6 +31,17 @@ interface Props {
  * slightly down. A 35mm-equivalent field of view keeps the proportions honest —
  * wide angles distort food and make it look wrong.
  */
+const CAMERA_START: [number, number, number] = [0, 2.2, 5.5];
+
+/**
+ * How far above the horizon that rig sits. Framing needs it, so it is derived
+ * from the rig rather than written down a second time and left to drift.
+ */
+const CAMERA_ELEVATION = Math.atan2(
+  CAMERA_START[1],
+  Math.hypot(CAMERA_START[0], CAMERA_START[2]),
+);
+
 export function CakeScene({
   config, autoRotate = false, className, interactive = true, followView = false,
 }: Props) {
@@ -50,7 +61,7 @@ export function CakeScene({
         toneMappingExposure: 1.05,
         // Without ACES the highlights clip to white and the frosting loses form.
       }}
-      camera={{ position: [0, 2.2, 5.5], fov: 35, near: 0.1, far: 60 }}
+      camera={{ position: CAMERA_START, fov: 35, near: 0.1, far: 60 }}
       /*
        * A still cake does not need 60 frames a second. The landing page mounts
        * four of these canvases and the presets page eight; on "always" that was
@@ -141,7 +152,17 @@ function Framing({ config, animate = true }: { config: CakeConfig; animate?: boo
     const crown = config.toppings.some(t => t.placement === "crown") ? 0.34 : 0.12;
     const tall = height + 0.14 + crown;
 
-    const needV = tall / 2 / halfV;
+    // The rig looks *down* at the cake, so the height is not what the frame has
+    // to hold. The top rim and the board separate on screen by the height
+    // foreshortened plus the depth of the cake tipped towards the lens, and
+    // fitting bare `tall` under-reads that by half on a big cake. It stayed
+    // hidden for as long as width was the binding constraint, which it is on
+    // every stage taller than it is wide — i.e. every desktop one. Below lg the
+    // stage is short and wide, needV binds, and the cake grew out of the frame.
+    const projectedV =
+      tall * Math.cos(CAMERA_ELEVATION) + radius * 2 * Math.sin(CAMERA_ELEVATION);
+
+    const needV = projectedV / 2 / halfV;
     const needH = (radius * 2.34) / 2 / halfH;
 
     // 1.26 filled the frame edge to edge. A cake photographed with no air
