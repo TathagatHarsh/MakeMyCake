@@ -7,7 +7,7 @@ import { CakeBoard } from "./CakeBoard";
 import { MessagePlaque, plaqueFootprint } from "./MessagePlaque";
 import { Tier } from "./Tier";
 import { Toppings } from "./Toppings";
-import { DEFAULT_SLICE, footprintRadius, tierDims } from "./geometry";
+import { DEFAULT_SLICE, footprintRadius, tierDims, tierShape } from "./geometry";
 
 interface Props {
   config: CakeConfig;
@@ -45,12 +45,13 @@ export function Cake({
 
   return (
     <group>
-      {showBoard && <CakeBoard radius={tiers[0].radius} />}
+      {showBoard && <CakeBoard radius={tiers[0].radius} cakeRadius={tiers[0].radius} />}
 
       {tiers.map((dims, i) => (
         <Tier
           key={i}
           config={config}
+          shape={tierShape(config.shape, i, tiers.length)}
           dims={dims}
           index={i}
           seed={seed}
@@ -58,6 +59,10 @@ export function Cake({
           castShadow={castShadow}
           isTop={i === tiers.length - 1}
           sliced={sliced}
+          /* So each tier can bake the shadow of the one standing on it, and know
+             how deep into the one below it its own base sits. */
+          aboveRadius={tiers[i + 1]?.radius}
+          belowRadius={tiers[i - 1]?.radius}
         />
       ))}
 
@@ -87,6 +92,9 @@ export function cakeFocus(config: CakeConfig): { height: number; radius: number 
   const top = tiers[tiers.length - 1];
   return {
     height: top.y + top.height,
-    radius: footprintRadius(config.shape, tiers[0].radius),
+    // The *base* tier's shape, which on a tiered heart is a round — framing a
+    // round base as though its lobes stuck out would push the cake into the
+    // middle distance for no reason.
+    radius: footprintRadius(tierShape(config.shape, 0, tiers.length), tiers[0].radius),
   };
 }

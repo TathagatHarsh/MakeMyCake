@@ -5,7 +5,9 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import type { CakeConfig } from "@/lib/schema";
 import { achievable, hexToHsl, hslToHex, shade } from "@/lib/color";
-import { plaqueGeometry, surfaceRadius, type TierDims } from "./geometry";
+import {
+  plaqueGeometry, shellThickness, surfaceRadius, tierShape, type TierDims,
+} from "./geometry";
 import { useDisposed } from "./useDisposable";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { mulberry32 } from "@/lib/seed";
@@ -30,6 +32,26 @@ interface Props {
 
 const PLAQUE_COLOR = "#EFE0C4";
 
+/*
+ * The plaque's size on the cake.
+ *
+ * At 1.5 × the usable top radius, capped at 1.5 world units, the words came out as a
+ * pale smudge in the middle of the cake at the size the page actually renders it —
+ * legible if you already knew what it said, which is not legible. A real piped plaque
+ * is a generous object: it is the thing the cake is *for*.
+ */
+// 1.72 overshot the other way: on a fondant 2kg the plaque became a slab covering
+// most of the top. 1.55 is generous and still leaves the cake visible round it.
+const PLAQUE_WIDTH_RATIO = 1.55;
+const PLAQUE_MAX_WIDTH = 1.58;
+const PLAQUE_ASPECT = 0.44;
+
+/** The plaque lies on the top tier, whose shape is not always the cake's — a
+ *  tiered heart is a heart over rounds. See geometry.tierShape. */
+function topShape(config: CakeConfig, tiers: TierDims[]) {
+  return tierShape(config.shape, tiers.length - 1, tiers.length);
+}
+
 /** Footprint on the top surface, so toppings can be told to keep off it. */
 export interface PlaqueFootprint {
   /** Centre in XZ. */
@@ -43,8 +65,8 @@ export function plaqueFootprint(config: CakeConfig, tiers: TierDims[]): PlaqueFo
   if (!config.message?.trim()) return null;
   const top = tiers[tiers.length - 1];
   const topR = surfaceRadius(config.shape, top.radius);
-  const width = Math.min(topR * 1.5, 1.5);
-  const depth = width * 0.46;
+  const width = Math.min(topR * PLAQUE_WIDTH_RATIO, PLAQUE_MAX_WIDTH);
+  const depth = width * PLAQUE_ASPECT;
   return {
     cx: 0,
     cz: topR * 0.06,
@@ -108,7 +130,9 @@ function messageTexture(text: string, ink: string, width: number, height: number
   const family =
     `"Snell Roundhand", "Apple Chancery", "Segoe Script", "Brush Script MT", ` +
     `Georgia, "Times New Roman", serif`;
-  const font = (px: number) => `italic 600 ${px}px ${family}`;
+  // 700 rather than 600: the bead has to survive being mipmapped down to a plaque
+  // that is a couple of hundred pixels across on the page.
+  const font = (px: number) => `italic 700 ${px}px ${family}`;
 
   let fontSize = Math.min(H / (lines.length * 1.42), W / (maxChars * 0.46));
   ctx.font = font(fontSize);
@@ -125,18 +149,39 @@ function messageTexture(text: string, ink: string, width: number, height: number
   const lineHeight = fontSize * 1.18;
   const startY = H / 2 - ((lines.length - 1) * lineHeight) / 2;
 
+  /*
+   * Three passes per line, and the order matters. Piped royal icing is a *round bead*
+   * sitting on the plaque, so it has a shadow on the side away from the light, a body,
+   * and a highlight along the top of the bead. The previous version had the first two
+   * and not the third, which is why the lettering read as a printed decal that had
+   * been slightly smudged rather than as something applied with a piping bag.
+   *
+   * The map is also the bump map, so these passes do double duty: the highlight lifts
+   * the bead's crown in the bump as well as in the colour.
+   */
   lines.forEach((l, i) => {
     const y = startY + i * lineHeight;
-    // A soft under-shadow gives the piping a rounded bead look.
-    ctx.fillStyle = "rgba(0,0,0,0.22)";
-    ctx.fillText(l, W / 2 + fontSize * 0.035, y + fontSize * 0.05);
+
+    // Contact shadow, down and to the shadow side.
+    ctx.fillStyle = "rgba(74,52,30,0.3)";
+    ctx.fillText(l, W / 2 + fontSize * 0.03, y + fontSize * 0.045);
+
+    // The bead itself, stroked as well as filled so it thickens rather than
+    // thinning out at the joins of a script face.
     ctx.fillStyle = ink;
-    ctx.fillText(l, W / 2, y);
-    // Piped icing is a raised bead with an edge, not a printed glyph. A hairline
-    // stroke in the same colour is what makes it read as piping at a distance.
-    ctx.lineWidth = Math.max(1, fontSize * 0.02);
+    ctx.lineWidth = Math.max(1.5, fontSize * 0.045);
     ctx.strokeStyle = ink;
     ctx.strokeText(l, W / 2, y);
+    ctx.fillText(l, W / 2, y);
+
+    // Highlight along the top of the bead: a thin, offset, lighter pass, clipped to
+    // the bead by drawing it inside the same glyph with a tight stroke.
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = Math.max(1, fontSize * 0.014);
+    ctx.strokeText(l, W / 2 - fontSize * 0.012, y - fontSize * 0.018);
+    ctx.restore();
   });
 
   const map = new THREE.CanvasTexture(canvas);
@@ -156,11 +201,11 @@ function messageTexture(text: string, ink: string, width: number, height: number
 export function MessagePlaque({ config, tiers, castShadow, composing = false }: Props) {
   const text = config.message?.trim();
   const top = tiers[tiers.length - 1];
-  const topR = surfaceRadius(config.shape, top.radius);
+  const topR = surfaceRadius(topShape(config, tiers), top.radius);
   const reduced = useReducedMotion();
 
-  const width = Math.min(topR * 1.5, 1.5);
-  const height = width * 0.46;
+  const width = Math.min(topR * PLAQUE_WIDTH_RATIO, PLAQUE_MAX_WIDTH);
+  const height = width * PLAQUE_ASPECT;
 
   const geometry = useDisposed(useMemo(
     () => plaqueGeometry(width, height),
@@ -185,7 +230,17 @@ export function MessagePlaque({ config, tiers, castShadow, composing = false }: 
     [text, ink, width, height],
   ));
 
-  const restY = top.y + top.height + 0.012;
+  /*
+   * On the frosting, not on the sponge.
+   *
+   * `top.height` is the height of the *tier*; the frosting shell over it is built one
+   * thickness taller (see geometry.shellGeometry). Adding 0.012 to the tier height
+   * therefore put the plaque some 27mm *inside* the buttercream on a 1kg cake, which
+   * is most of why it read as a decal printed on the surface rather than as an object
+   * lying on it. Seated one shell thickness up, then pressed in by a hair so it beds
+   * into the frosting the way something laid on buttercream does.
+   */
+  const restY = top.y + top.height + shellThickness(top.radius) - 0.004;
   // Lifted clear, not launched — it has to stay obviously part of the cake.
   const hoverY = restY + Math.max(0.3, top.height * 0.4);
 
@@ -200,7 +255,10 @@ export function MessagePlaque({ config, tiers, castShadow, composing = false }: 
     // Positive tilt about X brings the lettering face towards the camera.
     // Negative tips it away, and you end up reading the back of the plaque —
     // which renders the message mirrored.
-    const wantTilt = composing ? 0.5 : 0.22;
+    // 0.22 rad is 13 degrees, on a flat cake top: enough to read as a card propped
+    // against something. At rest a plaque lies down, with just enough tilt to catch
+    // the key light on the lettering.
+    const wantTilt = composing ? 0.5 : 0.07;
 
     if (reduced || !started.current) {
       g.position.y = wantY;

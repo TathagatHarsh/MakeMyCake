@@ -237,21 +237,56 @@ export interface ToppingGeo {
   scale: number;
   /** Sits flat on the surface rather than being dropped at a random angle. */
   flat: boolean;
+  /**
+   * The lowest point of the geometry in its own unit space.
+   *
+   * Every topping used to be placed at `surfaceY + size * 0.4` — one constant for
+   * twelve garnishes whose origins sit in completely different places. A strawberry
+   * runs from -0.5 to 0.4, so 0.4 buried nearly half of it, which is why they read
+   * as red claws rather than as fruit; a flake of gold leaf is 0.09 tall in total,
+   * so the same 0.4 left it hovering 6mm clear of the frosting. Knowing where a
+   * piece's own bottom is lets it be *seated* rather than guessed at.
+   */
+  bottom: number;
+  /** Height in unit space, which the sink below is a fraction of. */
+  height: number;
+  /**
+   * How far the piece presses into the frosting, as a fraction of its own height.
+   *
+   * Nothing rests exactly on top of buttercream: something hard and heavy sinks a
+   * little, something soft nestles, and gold leaf is laid onto the surface and
+   * follows it. With no sink every garnish is tangent to the surface at exactly one
+   * point, and that is the floating look.
+   */
+  sink: number;
 }
 
-const builders: Record<Topping, () => Omit<ToppingGeo, "geometry"> & { build: () => THREE.BufferGeometry }> = {
-  strawberry: () => ({ build: strawberry, vertexColors: true, scale: 0.26, flat: true }),
-  "mixed-berry": () => ({ build: berry, vertexColors: false, scale: 0.16, flat: false }),
-  "chocolate-shard": () => ({ build: shard, vertexColors: false, scale: 0.34, flat: false }),
-  "chocolate-curl": () => ({ build: curl, vertexColors: false, scale: 0.24, flat: true }),
-  macaron: () => ({ build: macaron, vertexColors: false, scale: 0.3, flat: true }),
-  "meringue-kiss": () => ({ build: meringue, vertexColors: false, scale: 0.24, flat: true }),
-  "gold-leaf": () => ({ build: goldLeaf, vertexColors: false, scale: 0.16, flat: true }),
-  sprinkles: () => ({ build: sprinkle, vertexColors: false, scale: 0.13, flat: false }),
-  "pistachio-crumb": () => ({ build: crumb, vertexColors: false, scale: 0.12, flat: false }),
-  "edible-flower": () => ({ build: flower, vertexColors: true, scale: 0.36, flat: true }),
-  oreo: () => ({ build: oreo, vertexColors: true, scale: 0.24, flat: true }),
-  ferrero: () => ({ build: ferrero, vertexColors: false, scale: 0.24, flat: false }),
+type Builder = Omit<ToppingGeo, "geometry" | "bottom" | "height">
+  & { build: () => THREE.BufferGeometry };
+
+/**
+ * `scale` is world size per piece and `sink` how deep it presses in.
+ *
+ * A strawberry at 0.26 was 24mm of real fruit on an 8in cake — bigger than any
+ * strawberry that has ever been on a cake, and once seated properly rather than
+ * half-buried it was unmissable. The berries, macarons and Oreos were all a shade
+ * over life size for the same reason: they had been scaled up to stay visible while
+ * half of each one was inside the frosting.
+ */
+const builders: Record<Topping, () => Builder> = {
+  strawberry: () => ({ build: strawberry, vertexColors: true, scale: 0.2, flat: true, sink: 0.1 }),
+  "mixed-berry": () => ({ build: berry, vertexColors: false, scale: 0.145, flat: false, sink: 0.16 }),
+  "chocolate-shard": () => ({ build: shard, vertexColors: false, scale: 0.34, flat: false, sink: 0.14 }),
+  "chocolate-curl": () => ({ build: curl, vertexColors: false, scale: 0.24, flat: true, sink: 0.12 }),
+  macaron: () => ({ build: macaron, vertexColors: false, scale: 0.27, flat: true, sink: 0.07 }),
+  "meringue-kiss": () => ({ build: meringue, vertexColors: false, scale: 0.22, flat: true, sink: 0.08 }),
+  // Laid on with a brush: it takes the shape of whatever is under it.
+  "gold-leaf": () => ({ build: goldLeaf, vertexColors: false, scale: 0.16, flat: true, sink: 0.45 }),
+  sprinkles: () => ({ build: sprinkle, vertexColors: false, scale: 0.13, flat: false, sink: 0.3 }),
+  "pistachio-crumb": () => ({ build: crumb, vertexColors: false, scale: 0.12, flat: false, sink: 0.3 }),
+  "edible-flower": () => ({ build: flower, vertexColors: true, scale: 0.34, flat: true, sink: 0.22 }),
+  oreo: () => ({ build: oreo, vertexColors: true, scale: 0.22, flat: true, sink: 0.1 }),
+  ferrero: () => ({ build: ferrero, vertexColors: false, scale: 0.24, flat: false, sink: 0.12 }),
 };
 
 const cache = new Map<Topping, ToppingGeo>();
@@ -259,12 +294,22 @@ const cache = new Map<Topping, ToppingGeo>();
 export function toppingGeo(kind: Topping): ToppingGeo {
   const hit = cache.get(kind);
   if (hit) return hit;
+
   const spec = builders[kind]();
+  const geometry = spec.build();
+  // Measured rather than declared: a builder that changes its profile should not
+  // also have to remember to update a hand-written extent.
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox!;
+
   const made: ToppingGeo = {
-    geometry: spec.build(),
+    geometry,
     vertexColors: spec.vertexColors,
     scale: spec.scale,
     flat: spec.flat,
+    sink: spec.sink,
+    bottom: box.min.y,
+    height: Math.max(1e-4, box.max.y - box.min.y),
   };
   cache.set(kind, made);
   return made;

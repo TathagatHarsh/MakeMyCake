@@ -78,15 +78,22 @@ export function CakeScene({
               drawn underneath an opaque disc and the cake appeared to float on
               nothing. It belongs just below the board, where the pool of dark
               can spread past the board's edge and give the cake a base. */}
+          {/* Tightened rather than strengthened. At scale 6 this plane covered
+              nearly three times the board's own footprint, so its 512² map spent
+              most of its resolution on empty floor and the pool it drew had no
+              edge — a wide grey haze reads as fog, not as an object resting on a
+              surface. The cake's own contact with the *board* is baked now (see
+              CakeBoard → bakeOcclusion), which leaves this pass the one job it can
+              do well: putting the board on the worktop. */}
           {q.contactShadows && (
             <ContactShadows
-              position={[0, -0.052, 0]}
-              opacity={0.58}
-              scale={6}
-              blur={2.2}
-              far={2.4}
+              position={[0, -0.056, 0]}
+              opacity={0.62}
+              scale={3.6}
+              blur={1.5}
+              far={1.1}
               resolution={q.tier === "high" ? 512 : 256}
-              color="#3A2E22"
+              color="#31261C"
             />
           )}
         </group>
@@ -142,14 +149,34 @@ function Framing({ config, animate = true }: { config: CakeConfig; animate?: boo
     const tall = height + 0.14 + crown;
 
     const needV = tall / 2 / halfV;
-    const needH = (radius * 2.34) / 2 / halfH;
+    /*
+     * 2.34 radii is the *cake*. The widest thing in the scene is the board, which
+     * geometry.boardGeometry builds at 1.3 radii, and the contact shadow spreads a
+     * little past even that — so at a tight margin the board's near edge was cut off
+     * on exactly the cakes whose fit was width-constrained.
+     */
+    const needH = (radius * 2.72) / 2 / halfH;
 
-    // 1.26 filled the frame edge to edge. A cake photographed with no air
-    // around it reads as a product cut-out, not as something on a table.
-    const distance = THREE.MathUtils.clamp(Math.max(needV, needH) * 1.4, 2.6, 12);
+    /*
+     * 1.26 filled the frame edge to edge and 1.4 pushed the cake into the middle
+     * distance: on the landing hero it occupied under half the height of its own
+     * square and the rest was empty page. 1.18 keeps a clear margin — the cake still
+     * sits on a table rather than being a cut-out — while making it the subject.
+     */
+    const distance = THREE.MathUtils.clamp(Math.max(needV, needH) * 1.22, 2.6, 12);
 
-    // The cake sits in a group offset by -0.55; look at its actual middle.
-    return { distance, lookY: height * 0.5 - 0.55 };
+    /*
+     * The cake sits in a group offset by -0.55; look at its actual middle.
+     *
+     * Its *optical* middle, though, is above its geometric one. A cake is widest at
+     * the bottom and the board is wider still, so centring the geometry leaves the
+     * composition bottom-heavy and the interesting half — the top edge, the drip, the
+     * message — sitting low. Product photography lifts the look-at slightly for
+     * exactly this reason.
+     */
+    // Lifting the look-at spends vertical margin at the bottom of the frame, so it
+    // stays small: 0.56 of the height cropped the board on a three-tier.
+    return { distance, lookY: height * 0.53 - 0.55 };
   }, [config, aspect]);
 
   const applied = useRef(false);
