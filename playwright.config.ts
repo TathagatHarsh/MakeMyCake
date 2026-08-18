@@ -10,7 +10,11 @@ const KITCHEN_PASSWORD = process.env.KITCHEN_PASSWORD;
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 90_000,
+  // A shared CI runner draws this cake through SwiftShader on two cores, which
+  // is far slower than any developer machine. The assertions are the same; they
+  // just need longer to become true. Raising the ceiling rather than adding
+  // retries is deliberate -- retries would hide a real regression later.
+  timeout: process.env.CI ? 180_000 : 90_000,
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
   workers: 1,
@@ -20,7 +24,7 @@ export default defineConfig({
   snapshotPathTemplate: "{testDir}/snapshots/{arg}{ext}",
 
   expect: {
-    timeout: 15_000,
+    timeout: process.env.CI ? 30_000 : 15_000,
     toHaveScreenshot: {
       // Anti-aliasing on a software GL stack is never bit-exact.
       maxDiffPixelRatio: 0.02,
