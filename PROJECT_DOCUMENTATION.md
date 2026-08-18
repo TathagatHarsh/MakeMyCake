@@ -1154,9 +1154,10 @@ history, not only in Supabase's own migration log.
 (dev) and `db:deploy` (CI/production) are the ones to use. Prisma 7 renamed the diff
 flags: it is `--to-schema`, not the `--to-schema-datamodel` most guides still show.
 
-*Unproven.* The from-empty path — that `0_init` applies cleanly to a fresh database — has
-not been exercised locally (no scratch Postgres available). CI's first run is what settles
-it, since the `browser` job runs `db:deploy` against an empty container.
+*Proven.* The from-empty path was unverified locally (no scratch Postgres available) and
+is now settled by CI: the `browser` job applied both migrations to an empty `postgres:17`
+container — *"All migrations have been successfully applied"* — then seeded 77 catalogue
+items and 8 presets and built successfully.
 
 **H6 — ✅ FIXED — Orders had no lifecycle and no reader.**
 
@@ -1224,6 +1225,17 @@ authoring machine — until then the visual suite stays a local gate, and the re
 recorded in a comment at the foot of the workflow so nobody "helpfully" adds it back.
 
 *Note.* CI installs browsers explicitly; `npm ci` does not fetch them.
+
+*One adjustment the first run forced.* The full happy-path test failed twice, in two
+different places, while everything else passed and the whole suite passed locally every
+time. Different failure points from identical code is a speed symptom, not a correctness
+one: a shared runner draws the cake through SwiftShader on two cores, and the landing
+page's 3D hero saturates the main thread long enough that a 15 s assertion window expires
+before a click takes effect. `playwright.config.ts` now allows 180 s per test and 30 s per
+assertion **under `CI` only**. Deliberately not more retries — retries were already at 1,
+and more would hide a real regression next time. A slow environment needs time, not more
+chances. Local timeouts are unchanged so a slow assertion still fails fast where someone
+is watching.
 
 **H8 — Dead UI: the docket stamp.** `components/docket/Docket.tsx:14-15,87-93` implements
 a `stamped` overlay (with a matching `@utility stamp` in `globals.css:119-125`); no
