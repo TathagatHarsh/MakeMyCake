@@ -30,8 +30,19 @@ export function makeSlug(len = 7): string {
   return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join("");
 }
 
+/**
+ * The reference a customer keeps and reads back down a phone line.
+ *
+ * This was `MC-` plus a number in 1000..9999 — 9,000 values against a UNIQUE
+ * constraint on `Order.ref`. The birthday bound puts the first collision at
+ * around 110 orders; at 4,500 orders five retries fail ~3% of the time; past
+ * 9,000 every order fails forever. The retry loop in /api/orders was
+ * load-bearing rather than the backstop it reads as.
+ *
+ * The slug alphabet is already here and already excludes O/0 and I/l/1, so
+ * reusing it gives 31^6 ≈ 8.9e8 and puts the retry back to being a backstop.
+ * Uppercased because a reference gets read aloud and written down.
+ */
 export function makeOrderRef(): string {
-  const bytes = new Uint32Array(1);
-  crypto.getRandomValues(bytes);
-  return "MC-" + (1000 + (bytes[0] % 9000)).toString();
+  return "MC-" + makeSlug(6).toUpperCase();
 }

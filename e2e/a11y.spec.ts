@@ -16,6 +16,7 @@ const ROUTES = [
   ["/build/toppings", "toppings step"],
   ["/build/message", "message step"],
   ["/build/review", "review"],
+  ["/kitchen", "kitchen board"],
 ] as const;
 
 test.describe("accessibility", () => {

@@ -13,10 +13,6 @@ type Disposable = { dispose: () => void };
  * Takes the value rather than a factory so callers keep a literal dependency
  * list on their own `useMemo`, which is what the hook lint rules can verify.
  */
-export function disposeOnChange<T extends Disposable>(value: T): T {
-  return value;
-}
-
 export function useDisposed<T extends Disposable | null>(value: T): T {
   const prev = useRef<T | null>(null);
 
