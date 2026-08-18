@@ -441,7 +441,6 @@ client for the live estimate and on the server for the authoritative number.
 
 | Model | Purpose | Key fields | Read by app code? |
 |---|---|---|---|
-| `CatalogItem` | What the kitchen stocks | `kind` (enum), `slug`, `name`, `blurb`, `swatch`, `deltaPaise`, `active`, `sortOrder`; `@@unique([kind, slug])` | 🟥 **No.** Written only by `prisma/seed.ts:54`. The UI reads `lib/catalog.ts` constants instead |
 | `Design` | A saved, shareable cake | `slug` (unique), `config` (Json), `totalPaise`, `views` | ✅ `designs/route.ts`, `d/[slug]/page.tsx`. `views` is written but never read |
 | `Order` | A placed order | `ref` (unique), `config`, `priceBreakdown`, `totalPaise`, `payablePaise`, `status`, `userId?`, `paymentStatus`, contact, delivery, `allergens[]`, `servesMin/Max` | ✅ created only. Never read back by anything |
 | `OrderItem` | One frozen price line | `label`, `kind`, `amountPaise`, `position`, `catalogItemId?` | ✅ created via nested write. `catalogItemId` always `null` |
@@ -449,12 +448,15 @@ client for the live estimate and on the server for the authoritative number.
 **Conceptual relationships (only what the code supports)**
 
 ```
-CatalogItem ──(FK, never populated)──▶ OrderItem
-Design ──1:N──▶ Order          (relation exists; designId always null — see §12)
+Design ──1:N──▶ Order          (populated since H4)
 Order  ──1:N──▶ OrderItem      (cascade delete)
 
 User   ──▶ Order               📋 Order.userId is a nullable String with NO User model
 ```
+
+`CatalogItem` and `OrderItem.catalogItemId` were removed in `2_drop_catalog_item` — see
+H2/H3. The database now holds only what cannot be recomputed: saved designs, and orders
+with their price lines frozen at the moment they were agreed.
 
 ### 5.4 External services
 
@@ -965,7 +967,7 @@ Tripee/                                (repo root; the project is "makemycake")
 ├── prisma/
 │   ├── schema.prisma                  4 models, 3 enums
 │   ├── migrations/                    ★ 0_init (baseline) + 1_enable_rls
-│   └── seed.ts                        catalogue + presets upsert
+│   └── seed.ts                        preset upsert (catalogue lives in lib/)
 │
 ├── tests/                             Vitest, node env, 69 tests
 │   ├── pricing.test.ts  rules.test.ts  derived.test.ts
@@ -1104,13 +1106,28 @@ the fix reuses the error surface rather than adding one.
 `http://localhost:3000/d/7ums3qm`; a forced 503 surfaces the server's message in the
 alert, where previously nothing appeared.
 
-**H2 — The `CatalogItem` table is write-only.** Seeded by `prisma/seed.ts:54`, queried
+**H2 — ✅ FIXED — The `CatalogItem` table was write-only.**
+
+*Resolution: deleted.* The alternative was to make it the live catalogue, which meant
+rewriting how every option renders in order to fetch what `lib/catalog.ts` already holds —
+and `lib/pricing.ts` would still have had to be the authority on money, so the table would
+have remained a partial mirror. Two catalogues that can drift, one of them inert, is worse
+than one. Migration `2_drop_catalog_item`. Original finding follows.
+
+*Original finding.* The table was write-only. Seeded by `prisma/seed.ts:54`, queried
 by nothing (verified: the only occurrence of `catalogItem` in the whole repo is that
 seed call). The UI reads the `lib/catalog.ts` constants. Two catalogues that can drift,
 one of them inert. The schema's own header comment ("Joins and foreign keys, not
 denormalised duplicates") describes an intent the code does not implement.
 
-**H3 — `OrderItem.catalogItemId` is never populated.** `schema.prisma:129-131` documents
+**H3 — ✅ FIXED — `OrderItem.catalogItemId` was never populated.**
+
+*Resolution: column dropped* with the table it pointed at. Verified first that all 74
+existing rows held `NULL`, so nothing was lost. The frozen price lines that actually
+matter — `label`, `kind`, `amountPaise`, `position` — are untouched and still copied onto
+the order so a later catalogue edit cannot rewrite history. Original finding follows.
+
+*Original finding.* `catalogItemId` was never written. `schema.prisma:129-131` documents
 the FK; `orders/route.ts:119-124` creates line items without it. Every value is `null`,
 so the `CatalogItem ↔ OrderItem` relation is inert.
 
@@ -1333,7 +1350,6 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 |---|---|---|---|
 | Abuse of open write endpoints | High once public | DB flooding, PII spam | 🔴 **C2 — now the top open risk** |
 | Unencrypted client can reach the database | Medium | Password + PII in cleartext | 🟠 S2 |
-| Catalogue drift between code and DB | Medium | Confusing, currently inert | 🟠 H2/H3 |
 | Docket delta silently lost after a label rename | Medium | Wrong-looking ticket | 🟡 M3 |
 | ~~Order reference collision / exhaustion~~ | — | — | ✅ C1 fixed |
 | ~~Silent "Save & share" failure~~ | — | — | ✅ H1 fixed |
@@ -1341,6 +1357,7 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 | ~~Placed orders never reach the kitchen~~ | — | — | ✅ H6 fixed |
 | ~~Schema change with no migrations~~ | — | — | ✅ H5 fixed |
 | ~~No CI~~ | — | — | ✅ H7 fixed |
+| ~~Catalogue drift between code and DB~~ | — | — | ✅ H2/H3 fixed |
 
 ---
 
@@ -1372,8 +1389,6 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 |---|---|---|
 | **Order placement** | Full validation, authoritative repricing, frozen line items, a collision-resistant `MC-XXXXXX` reference (C1 ✅), and linkage to the saved design (H4 ✅) | **Any way to read an order back (H6).** This is now the only thing keeping it out of "fully implemented" |
 | **Save & share** | Endpoint, slug generation, share page, OG metadata, and failure now reported to the customer (H1 ✅) | Nothing outstanding |
-| **Catalogue in the database** | Schema, seed, enum, unique constraint, sort order, `active` flag | Any read path. The app uses the code constants (H2) |
-| **Order line ↔ catalogue link** | FK column and relation | Population (H3) |
 | **"Cakes we've delivered"** | Complete rendering path on the review page | Photos. `DELIVERED_PHOTOS` is `[]` **on purpose** — the author refused to label stock photography as delivered work |
 | **FSSAI licence line** | Complete rendering path, tested | The real number, via `NEXT_PUBLIC_FSSAI_LICENCE`. Blank **on purpose** |
 | **Design view counter** | Increment on visit | Any surface that reads it |
@@ -2192,7 +2207,6 @@ See §16. If you only get through three: `lib/schema.ts`, `lib/pricing.ts`, `lib
 
 **Genuinely unfinished:**
 - Rate limiting on the two public write endpoints (C2) — now the largest open item.
-- The `CatalogItem` decision (H2/H3) — the last structural question left.
 - Notification when an order arrives. The board exists; nothing tells anyone to look at
   it. Needs an email/SMS provider, so it was left out of H6 rather than half-built.
 - Per-person staff identity. The kitchen gate is one shared credential, so there is no
@@ -2221,12 +2235,9 @@ H4 (`designId` linkage), S1 (RLS), H6 (the kitchen board).
    H6 rather than half-built.
 3. **S2 — re-enable SSL enforcement.** A dashboard toggle. The app already complies, so
    it costs nothing and backstops every future client.
-4. **H2/H3 — decide `CatalogItem`'s fate.** Either make it the live catalogue or delete
-   the model and its inert FK. Leaving two catalogues is the worst of the three options,
-   and it is the last structural decision outstanding.
-5. **Re-baseline the visual suite per platform**, so it can join CI instead of being a
+4. **Re-baseline the visual suite per platform**, so it can join CI instead of being a
    local-only gate.
-6. **Give staff per-person identity** when more than one person uses the board — the
+5. **Give staff per-person identity** when more than one person uses the board — the
    current gate is one shared credential with no audit trail.
 
 ### 9. Before your first commit
@@ -2342,10 +2353,9 @@ runtime.
 **Database**
 PostgreSQL via Prisma 7, **live on Supabase** (project `makemycake`, ap-south-1,
 Postgres 17.6, free tier). Four models —
-`CatalogItem`, `Design`, `Order`, `OrderItem` — and three enums. Applied with
-`prisma db push`; **no migrations directory exists**. Only `Design` and
-`Order`/`OrderItem` are used by application code; `CatalogItem` is seed-written and never
-read. RLS is enabled on all four with no policies, which closes the PostgREST/anon-key
+`Design`, `Order`, `OrderItem` — and two enums, under a baselined migration history
+(`0_init`, `1_enable_rls`, `2_drop_catalog_item`). `CatalogItem` was removed: it was
+seed-written and never read. RLS is enabled on all four with no policies, which closes the PostgREST/anon-key
 exposure while leaving Prisma (connecting as table owner) unaffected. See §10 for the two
 connection traps.
 
@@ -2393,9 +2403,7 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
    reconciles by dropping.
 4. 🟠 SSL enforcement disabled on the database (S2); the app is unaffected, any careless
    client is not.
-5. 🟠 Two catalogues (code constants + an inert DB table) that can drift — the last
-   structural decision outstanding.
-6. 🟡 The visual suite cannot run in CI, because its baselines are platform-specific.
+5. 🟡 The visual suite cannot run in CI, because its baselines are platform-specific.
 7. 🟡 The docket↔pricing string-prefix coupling, untested and silently lossy.
 
 *Resolved since the original audit:* order-reference exhaustion (C1), silent save failure
@@ -2421,7 +2429,6 @@ write-only (H6), the absent migration history (H5), the absent CI (H7), dead cod
 3. Re-enable SSL enforcement in the Supabase dashboard (S2).
 4. Adopt Prisma migrations before the next schema change — the database has rows now.
 5. Wire the four green suites into CI, remembering `npx playwright install chromium`.
-6. Decide the fate of `CatalogItem` — make it the live catalogue or delete the model.
 7. Re-verify and remove the dead code in §12 M1/M2.
 8. Add an `engines` field to `package.json` so the Node floor stops being folklore.
 9. Confirm the remaining open questions in §13 — the deployment owner, whether

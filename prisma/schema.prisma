@@ -1,6 +1,11 @@
-// Pricing is relational: a modifier belongs to a (component, size band) pair and
-// an order line item references a catalog item that must not drift. Joins and
-// foreign keys, not denormalised duplicates.
+// Persistence only. The catalogue and the pricing engine live in lib/, not here:
+// lib/catalog.ts is what the UI renders and lib/pricing.ts is the authority on
+// money, and both are imported identically by the browser, the server and the
+// CLI. A CatalogItem table used to mirror them and was never read by a single
+// line of application code, so it was removed rather than left to drift.
+//
+// What the database holds is what cannot be recomputed: saved designs, and
+// orders with their price lines frozen at the moment they were agreed.
 
 generator client {
   provider = "prisma-client-js"
@@ -8,43 +13,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-}
-
-enum ComponentKind {
-  SHAPE
-  SIZE
-  SPONGE
-  FILLING
-  FROSTING
-  COVERAGE
-  FINISH
-  TOPPING
-  PLACEMENT
-  DELIVERY
-}
-
-/// The catalog a kitchen actually stocks. The pricing engine is the authority on
-/// money; this table is the authority on what exists and what it is called.
-model CatalogItem {
-  id        String        @id @default(cuid())
-  kind      ComponentKind
-  /// Matches the enum member in lib/schema.ts exactly.
-  slug      String
-  name      String
-  blurb     String
-  swatch    String?
-  /// Base price delta in paise, before the size multiplier.
-  deltaPaise Int          @default(0)
-  active    Boolean       @default(true)
-  sortOrder Int           @default(0)
-
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-
-  orderItems OrderItem[]
-
-  @@unique([kind, slug])
-  @@index([kind, active])
 }
 
 enum OrderStatus {
@@ -125,10 +93,6 @@ model OrderItem {
 
   orderId   String
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  /// Null for lines that are not a catalog choice (labour, delivery, GST).
-  catalogItemId String?
-  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id])
 
   label     String
   kind      String
