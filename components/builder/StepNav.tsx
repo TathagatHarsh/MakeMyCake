@@ -19,7 +19,7 @@ const FIELD_STEP: Record<string, string> = {
   message: "message", messageColor: "message", delivery: "message", pincode: "message",
 };
 
-export function currentStepIndex(pathname: string): number {
+function currentStepIndex(pathname: string): number {
   const slug = pathname.split("/").filter(Boolean).pop();
   const i = STEPS.findIndex(s => s.slug === slug);
   return i === -1 ? 0 : i;

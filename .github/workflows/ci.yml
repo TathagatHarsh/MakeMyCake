@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Types, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      # postinstall runs `prisma generate`; prisma.config.ts supplies a dummy
+      # connection string so this needs no database.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  browser:
+    name: End-to-end and accessibility
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["5432:5432"]
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # The kitchen board fails closed without these, so the a11y sweep would
+      # get a 503 rather than a page.
+      KITCHEN_USER: ci
+      KITCHEN_PASSWORD: ci-not-a-real-secret
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # Migrations rather than `db push`: this is the path production uses, so
+      # CI is the right place to find out it is broken.
+      - run: npm run db:deploy
+      - run: npm run db:seed
+
+      # `npm install` does not fetch browsers, and the failure looks nothing
+      # like a test failure.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run build
+      - run: npm run e2e
+      - run: npm run a11y
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+# `npm run visual` is deliberately not here. The baselines in e2e/snapshots are
+# committed PNGs rendered on Apple Silicon through SwiftShader; a Linux runner
+# produces different anti-aliasing and would fail every run for reasons that
+# have nothing to do with the change under test. Re-baselining per platform, or
+# pinning a container that matches the authoring machine, is the fix — until
+# then a red X that always means nothing is worse than no check at all.

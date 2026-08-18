@@ -16,9 +16,9 @@
 >
 > ### Revision — after the Supabase connection and the first round of fixes
 >
-> The app now runs against a live PostgreSQL database (Supabase), and four
-> defects this document originally reported — **C1**, **H1**, **H4** and **H6** —
-> have been fixed and verified end to end. H6 was the largest: orders are now
+> The app now runs against a live PostgreSQL database (Supabase), and eight
+> findings this document originally reported — **C1**, **H1**, **H4**, **H5**,
+> **H6**, **H7**, **M1/M2** and **M13** — have been fixed and verified end to end. H6 was the largest: orders are now
 > readable and advanceable through a gated staff board at `/kitchen`, so the
 > product can finally fulfil what it takes.
 > Fixed items are marked **✅ FIXED** inline and
@@ -887,9 +887,10 @@ One URL serves both migration and runtime, which is what `prisma.config.ts` and
 
 ### CI/CD
 
-**None in the repository.** No `.github/`, no `.gitlab-ci.yml`, no `Jenkinsfile`, no
-`vercel.json` build hooks. All four test suites are run by hand. Deployment is
-presumed to be Vercel's Git integration. ❓ **Needs confirmation.**
+`.github/workflows/ci.yml` — a `quality` job (typecheck, lint, unit, build; no database)
+and a `browser` job (postgres service, `db:deploy`, seed, Chromium, e2e + a11y). The
+visual suite is deliberately excluded; see H7 for why. There is still no `vercel.json`,
+and deployment is presumed to be Vercel's Git integration. ❓ **Needs confirmation.**
 
 ### Deployment dependencies
 
@@ -960,10 +961,11 @@ Tripee/                                (repo root; the project is "makemycake")
 │   ├── docket/                        the trust surface (3 files)
 │   └── three/                         the renderer (16 files, ~3,400 lines)
 │
+├── .github/workflows/ci.yml           ★ quality + browser jobs (visual excluded)
 ├── prisma/
 │   ├── schema.prisma                  4 models, 3 enums
+│   ├── migrations/                    ★ 0_init (baseline) + 1_enable_rls
 │   └── seed.ts                        catalogue + presets upsert
-│       (NOTE: no migrations/ directory)
 │
 ├── tests/                             Vitest, node env, 69 tests
 │   ├── pricing.test.ts  rules.test.ts  derived.test.ts
@@ -1132,9 +1134,29 @@ the one on screen.
 *Verified.* Order `MC-TWBRMZ` is the first row in this database that joins to its design
 (`7f8rxdk`).
 
-**H5 — No migration history.** `prisma.config.ts:17` points at `prisma/migrations`,
-which does not exist. The workflow is `prisma db push`. There is no reviewed, ordered,
-reversible path to change the schema of a database that already holds orders.
+**H5 — ✅ FIXED — No migration history.**
+
+*Original finding.* `prisma.config.ts:17` pointed at `prisma/migrations`, which did not
+exist. The workflow was `prisma db push`, which reconciles by dropping — harmless against
+an empty database, and not harmless once it holds orders.
+
+*Fix.* Baselined with Prisma's documented procedure: `0_init` generated from the schema
+with `migrate diff --from-empty --to-schema`, then both migrations marked applied with
+`migrate resolve`. `migrate diff --from-config-datasource` reports **no difference**, so
+the history and the live database agree.
+
+*The second migration matters more than it looks.* `1_enable_rls` carries the RLS
+statements from S1. Without it, `prisma migrate reset` would rebuild the tables **without**
+row-level security and silently undo that fix — the security posture has to live in the
+history, not only in Supabase's own migration log.
+
+*Note.* `npm run db:push` still exists and is now the dangerous option; `db:migrate`
+(dev) and `db:deploy` (CI/production) are the ones to use. Prisma 7 renamed the diff
+flags: it is `--to-schema`, not the `--to-schema-datamodel` most guides still show.
+
+*Unproven.* The from-empty path — that `0_init` applies cleanly to a fresh database — has
+not been exercised locally (no scratch Postgres available). CI's first run is what settles
+it, since the `browser` job runs `db:deploy` against an empty container.
 
 **H6 — ✅ FIXED — Orders had no lifecycle and no reader.**
 
@@ -1184,8 +1206,24 @@ sweep (11 routes, zero violations) with credentials supplied via `playwright.con
 SMS provider, a new dependency and new credentials, and is a separate decision. Staff must
 currently look at the board. There is also no customer-facing "track my order" lookup.
 
-**H7 — No CI.** Four good test suites and nothing runs them automatically. No `.github/`,
-no pipeline config anywhere.
+**H7 — ✅ FIXED — No CI.**
+
+*Original finding.* Four good test suites and nothing ran them automatically.
+
+*Fix.* `.github/workflows/ci.yml`, two jobs. `quality` runs typecheck, lint, unit tests
+and build with no database (`prisma.config.ts` supplies a dummy URL, so `prisma generate`
+never blocks). `browser` brings up a `postgres:17` service, runs `db:deploy` and the seed,
+installs Chromium, then runs e2e and a11y — uploading Playwright traces on failure.
+
+*`npm run visual` is deliberately excluded, and this is a real gap rather than an
+oversight.* The committed baselines were rendered on Apple Silicon through SwiftShader; a
+Linux runner produces different anti-aliasing and would fail every run for reasons
+unrelated to the change under test. A check that is always red means nothing, which is
+worse than no check. The fix is per-platform baselines or a container matching the
+authoring machine — until then the visual suite stays a local gate, and the reasoning is
+recorded in a comment at the foot of the workflow so nobody "helpfully" adds it back.
+
+*Note.* CI installs browsers explicitly; `npm ci` does not fetch them.
 
 **H8 — Dead UI: the docket stamp.** `components/docket/Docket.tsx:14-15,87-93` implements
 a `stamped` overlay (with a matching `@utility stamp` in `globals.css:119-125`); no
@@ -1195,7 +1233,7 @@ all. The feature is complete and unreachable.
 
 ### 🟡 Medium
 
-**M1 — Dead exports** (verified: each is referenced only at its own definition):
+**M1 — ✅ FIXED — Dead exports.** Each was re-verified as referenced only at its own definition, then removed. `currentStepIndex` kept its function (3 in-file callers) and lost only its `export`. Removing `leadTimeLabel` orphaned a `CakeConfig` import in `lib/delivery.ts`, which went with it:
 
 | Symbol | File |
 |---|---|
@@ -1207,9 +1245,7 @@ all. The feature is complete and unreachable.
 | `disposeOnChange` | `components/three/useDisposable.ts:16` (a no-op identity function) |
 | `currentStepIndex` | `components/builder/StepNav.tsx:22` — used twice *within its own file*; the `export` is unnecessary |
 
-**M2 — Unreferenced files.**
-`public/{file,globe,next,vercel,window}.svg` are Next.js starter defaults referenced
-nowhere. `scripts/slicetest.ts` has no npm script and no importer.
+**M2 — ✅ FIXED — Unreferenced files.** The five Next.js starter SVGs in `public/` and `scripts/slicetest.ts` (no npm script, no importer) were deleted after re-verification.
 
 **M3 — Fragile docket↔pricing coupling.** `lib/docket.ts:70-82` matches price lines by
 lowercase *prefix* plus `kind`, consuming each line once. It has already been hardened
@@ -1256,7 +1292,7 @@ output against the other's.
 **M12 — Vestigial config.** `package.json:60-66` `allowScripts` is
 `@lavamoat/allow-scripts` configuration, but lavamoat is not a dependency.
 
-**M13 — No `engines` field**, and the two docs disagree (Node 22+ vs Node 26).
+**M13 — ✅ FIXED — No `engines` field.** `package.json` now declares `"node": "^20.19.0 || >=22.12.0"`, matching what Next 16 and Prisma 7 actually require and what was verified running. The two prose docs still disagree with each other; the field is now the authority.
 
 **M14 — `lib/db.ts:35-39` Proxy returns unbound members** via `Reflect.get`. Fine for
 the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)` or
@@ -1285,13 +1321,14 @@ the model delegates used today (`db.design`, `db.order`); `db.$transaction(...)`
 |---|---|---|---|
 | Abuse of open write endpoints | High once public | DB flooding, PII spam | 🔴 **C2 — now the top open risk** |
 | Unencrypted client can reach the database | Medium | Password + PII in cleartext | 🟠 S2 |
-| Schema change on a live DB with no migrations | Medium — **rose sharply**, the DB now holds rows | Data loss | 🟠 H5 |
 | Catalogue drift between code and DB | Medium | Confusing, currently inert | 🟠 H2/H3 |
 | Docket delta silently lost after a label rename | Medium | Wrong-looking ticket | 🟡 M3 |
 | ~~Order reference collision / exhaustion~~ | — | — | ✅ C1 fixed |
 | ~~Silent "Save & share" failure~~ | — | — | ✅ H1 fixed |
 | ~~Tables readable via the anon key~~ | — | — | ✅ S1 fixed |
 | ~~Placed orders never reach the kitchen~~ | — | — | ✅ H6 fixed |
+| ~~Schema change with no migrations~~ | — | — | ✅ H5 fixed |
+| ~~No CI~~ | — | — | ✅ H7 fixed |
 
 ---
 
@@ -2143,6 +2180,7 @@ See §16. If you only get through three: `lib/schema.ts`, `lib/pricing.ts`, `lib
 
 **Genuinely unfinished:**
 - Rate limiting on the two public write endpoints (C2) — now the largest open item.
+- The `CatalogItem` decision (H2/H3) — the last structural question left.
 - Notification when an order arrives. The board exists; nothing tells anyone to look at
   it. Needs an email/SMS provider, so it was left out of H6 rather than half-built.
 - Per-person staff identity. The kitchen gate is one shared credential, so there is no
@@ -2171,13 +2209,13 @@ H4 (`designId` linkage), S1 (RLS), H6 (the kitchen board).
    H6 rather than half-built.
 3. **S2 — re-enable SSL enforcement.** A dashboard toggle. The app already complies, so
    it costs nothing and backstops every future client.
-4. **H5 — adopt migrations.** This climbed: `prisma db push` reconciles by dropping, and
-   the database is no longer empty.
-5. **H7 — wire up CI.** Four suites exist, all green, and nothing obliges anyone to run
-   them. Note that CI will need `npx playwright install chromium`.
-6. **H2/H3 — decide `CatalogItem`'s fate.** Either make it the live catalogue or delete
-   the model and its inert FK. Leaving two catalogues is the worst of the three options.
-7. **M1/M2 — delete the confirmed dead code** once you have re-verified it yourself.
+4. **H2/H3 — decide `CatalogItem`'s fate.** Either make it the live catalogue or delete
+   the model and its inert FK. Leaving two catalogues is the worst of the three options,
+   and it is the last structural decision outstanding.
+5. **Re-baseline the visual suite per platform**, so it can join CI instead of being a
+   local-only gate.
+6. **Give staff per-person identity** when more than one person uses the board — the
+   current gate is one shared credential with no audit trail.
 
 ### 9. Before your first commit
 
@@ -2330,6 +2368,7 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
 | Sharing | ~100% (H1 fixed) |
 | Order capture | ~95% (C1 and H4 fixed; verified end to end against a live database) |
 | Order *fulfilment* — reading, status, staff board | ~80% (H6) — readable and advanceable; no notification, no per-person identity |
+| Engineering hygiene — migrations, CI, dead code | ~90% (H5, H7, M1/M2, M13) — visual suite still local-only |
 | Customer authentication / payments / analytics | **0%** (hooks only) |
 | **Overall, as a shippable business** | **~80%** — the customer-facing half was already finished to a high standard; the operational half now exists in its minimum honest form. What is left is mostly hardening (C2, S2, H5, CI) and one product decision: how the kitchen gets told |
 
@@ -2342,13 +2381,15 @@ database, on Node 20.20.2. No hosted deployment of this configuration has been v
    reconciles by dropping.
 4. 🟠 SSL enforcement disabled on the database (S2); the app is unaffected, any careless
    client is not.
-5. 🟠 Two catalogues (code constants + an inert DB table) that can drift.
-6. 🟠 No CI — four green suites nobody is obliged to run.
+5. 🟠 Two catalogues (code constants + an inert DB table) that can drift — the last
+   structural decision outstanding.
+6. 🟡 The visual suite cannot run in CI, because its baselines are platform-specific.
 7. 🟡 The docket↔pricing string-prefix coupling, untested and silently lossy.
 
 *Resolved since the original audit:* order-reference exhaustion (C1), silent save failure
-(H1), unlinked designs (H4), tables exposed via the anon key (S1), and orders being
-write-only (H6).
+(H1), unlinked designs (H4), tables exposed via the anon key (S1), orders being
+write-only (H6), the absent migration history (H5), the absent CI (H7), dead code
+(M1/M2) and the missing `engines` field (M13).
 
 **Biggest product gaps**
 1. A placed order is now readable and advanceable, but **nothing announces it**. The
@@ -2375,8 +2416,9 @@ write-only (H6).
    `sessionStorage` is the intended persistence, and how an order is *meant* to reach the
    kitchen.
 
-*Completed from the previous revision of this list:* the order reference scheme, the
-`save()` failure path, `designSlug` linkage, and RLS.
+*Completed from the previous revisions of this list:* the order reference scheme (C1),
+the `save()` failure path (H1), `designSlug` linkage (H4), RLS (S1), the kitchen board
+(H6), migrations (H5), CI (H7), dead code (M1/M2) and the `engines` field (M13).
 
 ---
 

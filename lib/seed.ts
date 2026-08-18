@@ -30,15 +30,6 @@ export function seedFrom(c: CakeConfig): number {
   return h >>> 0;
 }
 
-export function hashString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
 /** mulberry32 — four lines, good enough, deterministic. */
 export function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -72,22 +63,6 @@ export function scatterDisc(
     if (pts.every(q => Math.hypot(q[0] - p[0], q[1] - p[1]) >= minDist)) {
       pts.push(p);
     }
-  }
-  return pts;
-}
-
-/** Evenly spaced ring with a small seeded wobble so it doesn't read mechanical. */
-export function scatterRing(
-  rng: () => number,
-  count: number,
-  radius: number,
-  wobble = 0.02,
-): [number, number][] {
-  const pts: [number, number][] = [];
-  for (let i = 0; i < count; i++) {
-    const a = (i / count) * Math.PI * 2 + (rng() - 0.5) * (Math.PI / count) * 0.6;
-    const d = radius + (rng() - 0.5) * wobble * 2;
-    pts.push([Math.cos(a) * d, Math.sin(a) * d]);
   }
   return pts;
 }

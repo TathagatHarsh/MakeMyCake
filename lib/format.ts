@@ -20,11 +20,6 @@ export function formatINR(paise: number): string {
   return INR.format(paise / 100);
 }
 
-/** For swatches and chips where two decimal places are noise. */
-export function formatINRShort(paise: number): string {
-  return INR_WHOLE.format(Math.round(paise / 100));
-}
-
 export function formatDelta(paise: number): string {
   if (paise === 0) return "included";
   const sign = paise > 0 ? "+" : "−";

@@ -1,4 +1,4 @@
-import type { CakeConfig, DeliverySlot } from "./schema";
+import type { DeliverySlot } from "./schema";
 
 /**
  * Named lead times per slot, per pincode. "Fast delivery" means nothing;
@@ -122,11 +122,6 @@ export function resolveSlot(slot: DeliverySlot, pincode?: string): ResolvedSlot 
       ? null
       : `${base.name} isn't available in ${zone.name} — the rider can't make the window.`,
   };
-}
-
-export function leadTimeLabel(c: CakeConfig): string {
-  const r = resolveSlot(c.delivery, c.pincode);
-  return `${r.effectiveLeadHours} hours`;
 }
 
 export function servicePincode(pincode?: string): boolean {

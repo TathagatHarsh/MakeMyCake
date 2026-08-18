@@ -57,8 +57,6 @@ export const useCake = create<CakeState>()(
   ),
 );
 
-export const useUndo = () => useCake.temporal.getState();
-
 /** Reactive undo/redo availability — `getState()` alone won't re-render. */
 export function useTemporal() {
   const past = useStore(useCake.temporal, (s) => s.pastStates.length);
