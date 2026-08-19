@@ -333,13 +333,6 @@ export function phiOf(x: number, z: number): number {
   return Math.atan2(x, z);
 }
 
-function angleKept(phi: number, sector: Sector): boolean {
-  let d = phi - sector.centre;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return Math.abs(d) > sector.width / 2;
-}
-
 export interface BodyOpts {
   shape: Shape;
   radius: number;
@@ -350,10 +343,15 @@ export interface BodyOpts {
   /** Omit for a whole cake; supply to cut a wedge out of it. */
   sector?: Sector;
   /**
-   * Close the cut with a flat face. True for anything solid — the sponge, the
+   * Close a lathe's cut with a flat face. True for anything solid — the sponge, the
    * filling. False for the frosting: a capped frosting shell puts a slab of
-   * buttercream across the whole cross-section and hides the very layers the
-   * cut exists to show. Left open, it reads as the thin skin it actually is.
+   * buttercream across the whole cross-section and hides the very layers the cut
+   * exists to show. Left open, it reads as the thin skin it actually is, and the
+   * lathe's profile carries the lid round with it either way.
+   *
+   * Extruded shapes ignore this — their wall follows the whole outline, the two
+   * radial cut edges included, and there is no way to ask ExtrudeGeometry for a
+   * wall with two faces missing. `shellGeometry` sets those cuts back instead.
    */
   capCut?: boolean;
 }
@@ -373,7 +371,7 @@ export function tierGeometry({
   if (shape === "bundt") return bundtGeometry(radius, height, segments, sector, capCut);
 
   const full = polygonFor(shape, radius - b);
-  const inset = sector ? cutShape(full, sector, capCut) : full;
+  const inset = sector ? cutShape(full, sector, b) : full;
   const g = new THREE.ExtrudeGeometry(inset, {
     depth: Math.max(0.01, height - b * 2),
     bevelEnabled: true,
@@ -412,12 +410,19 @@ function cutLathe(
   const wall = latheWithUV(profile, kept, phiStart, phiLength);
   if (!capped) return wall;
 
-  // The two cut faces look in opposite directions — away from the missing
-  // wedge on each side. One of them therefore needs its winding reversed, or it
-  // is back-face culled and you see straight through the cake.
+  /*
+   * The two cut faces look in opposite directions — away from the missing wedge on
+   * each side. One of them therefore needs its winding reversed, or it is back-face
+   * culled and you see straight through the cake.
+   *
+   * `phiStart` is the *end* of the removed wedge, so its face looks back down the
+   * decreasing-φ side — which is where ShapeGeometry's own +Z normal ends up once
+   * the profile is stood up. That one is already right; the far face is the one to
+   * turn round.
+   */
   const caps = [
-    capGeometry(profile, phiStart, true),
-    capGeometry(profile, phiStart + phiLength, false),
+    capGeometry(profile, phiStart, false),
+    capGeometry(profile, phiStart + phiLength, true),
   ];
   const merged = mergeGeometries([wall, ...caps], false);
 
@@ -444,9 +449,19 @@ function capGeometry(
   const shape = new THREE.Shape(profile.map(p => new THREE.Vector2(Math.max(0, p.x), p.y)));
   const g = new THREE.ShapeGeometry(shape);
 
-  // ShapeGeometry lies in XY. Lathe places a profile point at
-  // (x·sin φ, y, x·cos φ), so rotating about Y by (π/2 − φ) lands it correctly.
-  g.rotateY(Math.PI / 2 - phi);
+  /*
+   * ShapeGeometry lies in XY. Lathe places a profile point at
+   * (x·sin φ, y, x·cos φ), and rotateY(θ) sends (x, y, 0) to (x·cos θ, y, −x·sin θ) —
+   * so the angle that lands the profile on the lathe's own plane is (φ − π/2).
+   *
+   * It used to be (π/2 − φ), which is the same rotation the other way and puts the
+   * cap at (π − φ): both cut faces came out mirrored onto the far side of the cake,
+   * buried inside solid sponge where nothing could see them, leaving the actual cut
+   * uncapped. Every round and bundt cutaway was hollow — you looked straight through
+   * the slice at the inside of the far wall and at the pac-man notch in the layer
+   * discs across the cake.
+   */
+  g.rotateY(phi - Math.PI / 2);
 
   if (flip) {
     // Reverse the triangle winding, and flip the normals to match. The normals
@@ -486,45 +501,95 @@ function capGeometry(
 }
 
 /**
- * Clip a 2D outline to the kept sector and close it through the centre, so an
- * extruded shape loses the same wedge a lathe does. Extrude caps the result on
- * its own, which is why this does not need explicit cut faces.
+ * Clip a 2D outline to the kept sector and close it through the axis, so an extruded
+ * shape loses the same wedge a lathe does. Extrude caps the result on its own, which
+ * is why this does not need explicit cut faces — and why `bevel`, the extrude's own
+ * `bevelSize`, has to be compensated for below.
  */
-function cutShape(shape: THREE.Shape, sector: Sector, capped = true): THREE.Shape {
+function cutShape(shape: THREE.Shape, sector: Sector, bevel: number): THREE.Shape {
   const pts = shape.getSpacedPoints(288);
+  const n = pts.length;
+  const half = sector.width / 2;
 
-  // The extrude is rotated -90° about X, which sends shape Y to world -Z.
-  const phi = (p: THREE.Vector2) => phiOf(p.x, -p.y);
+  /*
+   * The wedge, as two half-planes rather than two angles — and each one pushed
+   * `bevel` further out of the cake than the sector asked for.
+   *
+   * That offset is the compensation for `ExtrudeGeometry`, which shifts the whole
+   * outline outward by `bevelSize` across the body of the extrusion. On the
+   * perimeter that is paid for by extruding `polygonFor(radius - b)`; on the two
+   * radial edges of the wedge it means the cut creeps into the void. Measured on a
+   * square at bevel 0.1 the wedge came out 0.07rad narrow at the rim and *half* the
+   * asked-for angle near the axis, because the apex had slid off-centre — which on
+   * a frosting shell, whose bevel is the heaviest in the cake, was enough to plant
+   * the shell's cut face in front of the sponge's and hide the cross-section.
+   *
+   * A world angle θ points (sin θ, −cos θ) in shape space, so (cos θ, sin θ) is its
+   * plane's normal there; signing it by which side of the wedge it bounds makes
+   * "kept" the same test on both.
+   */
+  const normal = (s: 1 | -1) => {
+    const th = sector.centre + s * half;
+    return new THREE.Vector2(Math.cos(th) * s, Math.sin(th) * s);
+  };
+  const nPos = normal(1), nNeg = normal(-1);
+  const keep = pts.map(p => p.dot(nPos) >= bevel || p.dot(nNeg) >= bevel);
+  if (!keep.some(k => k) || keep.every(k => k)) return shape;
 
-  const kept: THREE.Vector2[] = [];
-  for (let i = 0; i < pts.length; i++) {
-    if (angleKept(phi(pts[i]), sector)) kept.push(pts[i]);
-  }
-  if (kept.length < 3) return shape;
+  // The run of kept points, found by the one place it starts rather than by
+  // guessing at a gap in the list.
+  const start = keep.findIndex((k, i) => k && !keep[(i - 1 + n) % n]);
+  if (start < 0) return shape;
 
-  // Rotate the list so the run of kept points is contiguous rather than wrapped.
-  let breakAt = 0;
-  for (let i = 0; i < kept.length; i++) {
-    const prev = kept[(i - 1 + kept.length) % kept.length];
-    if (kept[i].distanceTo(prev) > shape.getLength() / 12) { breakAt = i; break; }
-  }
-  const ordered = [...kept.slice(breakAt), ...kept.slice(0, breakAt)];
+  const ordered: THREE.Vector2[] = [];
+  for (let i = 0; i < n && keep[(start + i) % n]; i++) ordered.push(pts[(start + i) % n]);
+  if (ordered.length < 3) return shape;
+
+  /*
+   * Both ends of that run land wherever the sampling happened to fall, up to one
+   * sample outside the wedge — 0.045rad of slop at mid-radius on a square, enough
+   * for the two sides of one wedge to disagree by 3°. So each end is walked back
+   * onto the exact plane it crossed, which is whichever of the two it sits nearer.
+   */
+  const nearer = (p: THREE.Vector2) => (p.dot(nPos) < p.dot(nNeg) ? nPos : nNeg);
+  const last = ordered.length - 1;
+  const before = pts[(start - 1 + n) % n];
+  const after = pts[(start + ordered.length) % n];
+  ordered[0] = onPlane(before, ordered[0], nearer(ordered[0]), bevel) ?? ordered[0];
+  ordered[last] = onPlane(after, ordered[last], nearer(ordered[last]), bevel) ?? ordered[last];
+
+  /*
+   * Closed through the apex, which is where those two offset planes cross rather
+   * than the centre. Clamped so a heavy bevel on a small cake cannot push it out
+   * past the outline and fold the polygon over itself; at that point the cut is
+   * slightly shy of the axis, which is invisible next to a wedge folded inside out.
+   */
+  const reach = Math.min(
+    bevel / Math.max(0.25, Math.sin(half)),
+    0.4 * Math.min(...pts.map(p => p.length())),
+  );
+  const apex = new THREE.Vector2(-Math.sin(sector.centre), Math.cos(sector.centre))
+    .multiplyScalar(reach);
 
   const out = new THREE.Shape();
-  if (capped) {
-    // Closed through the centre, so the extrude fills the cut face.
-    out.moveTo(0, 0);
-    for (const p of ordered) out.lineTo(p.x, p.y);
-  } else {
-    // Closed just inside the outline instead, leaving a thin band rather than
-    // a solid wedge of frosting across the cross-section.
-    const inner = ordered.map(p => new THREE.Vector2(p.x, p.y).multiplyScalar(0.965));
-    out.moveTo(ordered[0].x, ordered[0].y);
-    for (const p of ordered.slice(1)) out.lineTo(p.x, p.y);
-    for (const p of inner.reverse()) out.lineTo(p.x, p.y);
-  }
+  out.moveTo(apex.x, apex.y);
+  for (const p of ordered) out.lineTo(p.x, p.y);
   out.closePath();
   return out;
+}
+
+/**
+ * Where the segment `a`→`b` crosses the plane `nrm · p = d`, in shape space. Null
+ * if it does not, which leaves the caller on its sampled point.
+ */
+function onPlane(
+  a: THREE.Vector2, b: THREE.Vector2, nrm: THREE.Vector2, d: number,
+): THREE.Vector2 | null {
+  const da = a.dot(nrm) - d;
+  const db = b.dot(nrm) - d;
+  if (Math.abs(da - db) < 1e-9) return null;
+  const t = da / (da - db);
+  return t >= 0 && t <= 1 ? new THREE.Vector2().lerpVectors(a, b, t) : null;
 }
 
 /**
@@ -785,6 +850,29 @@ const FINISH_FREQUENCY: Record<Finish, number> = {
 };
 
 /**
+ * The shell's cut, moved back out of the sponge's way.
+ *
+ * Only extruded shapes need this. A lathe can be left open at the cut — see
+ * BodyOpts.capCut — but an extrude's wall runs round the whole outline, so a cut
+ * square, heart, rectangle or hexagon gets a slab of frosting across its
+ * cross-section whether it wants one or not. Coplanar with the sponge's own cut
+ * face, and bigger, the frosting won the depth test and hid the very layers the cut
+ * exists to show; that is what the old thin-band workaround was avoiding, at the
+ * price of the entire frosting lid.
+ *
+ * So the wedge is widened for the shell alone, by enough that its cut face — noise
+ * displacement and all — stays behind the sponge's. `amp` is the finish's
+ * displacement, doubled because a couple of the finishes stack a second term on top
+ * of it, plus 3mm for the residual in the bevel compensation in `cutShape`.
+ */
+function setBack(sector: Sector, radius: number, amp: number): Sector {
+  return {
+    centre: sector.centre,
+    width: sector.width + 2 * ((amp * 2 + 0.03) / Math.max(0.2, radius)),
+  };
+}
+
+/**
  * The shell is the tier profile grown by the frosting thickness, then pushed
  * along its own normals by seeded noise. Seeded, because a cake that reshuffles
  * on every React render looks broken.
@@ -795,17 +883,29 @@ export function shellGeometry(
   const t = opts.thickness ?? Math.max(0.022, opts.radius * 0.035);
   const H = opts.height + t;
   const B = Math.min((opts.radius + t) * 0.13, H * 0.2, 0.1);
+  const amp = FINISH_AMPLITUDE[opts.finish] * (opts.radius / 1.1);
+  const lathe = opts.shape === "round" || opts.shape === "bundt";
   const g = tierGeometry({
     ...opts,
-    // Frosting is a skin, not a solid. Leaving the cut open lets the sponge
-    // cross-section behind it show through.
+    // Frosting is a skin, not a solid.
     capCut: false,
+    sector: opts.sector && (lathe ? opts.sector : setBack(opts.sector, opts.radius, amp)),
     radius: opts.radius + t,
     height: H,
     bevel: B,
   });
+  /*
+   * Before displacing, not just after.
+   *
+   * `ExtrudeGeometry` keeps its lid and its side wall on separate vertices that
+   * happen to share a position, with the two surfaces' own normals. Displace along
+   * those and the seam splits — a hairline crack right round the top rim. It never
+   * showed on a whole cake, because with the frosting closed there is nothing behind
+   * it to see; on a cut cake the sponge is rendered, and the crack came out as a
+   * dashed brown line along the rim of the lid.
+   */
+  weldNormals(g);
 
-  const amp = FINISH_AMPLITUDE[opts.finish] * (opts.radius / 1.1);
   const freq = FINISH_FREQUENCY[opts.finish];
   const rng = mulberry32(opts.seed);
   const ox = rng() * 100, oy = rng() * 100, oz = rng() * 100;
