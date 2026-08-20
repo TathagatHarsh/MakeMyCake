@@ -68,3 +68,21 @@ test.describe("render baselines", () => {
     await expect(page).toHaveScreenshot("landing.png", { maxDiffPixelRatio: 0.02 });
   });
 });
+
+/**
+ * Below lg the stage is short and wide — 32dvh of a phone, against a canvas
+ * that is the full width. Nothing covered that until the framing was found to
+ * be solving the fit for a flat cake seen head-on: it forgot the rig looks
+ * *down*, so height alone under-read the room the cake needs and the cake grew
+ * out of the top and bottom of the frame. The desktop baselines could not catch
+ * it because a tall stage is bound by width, where the fit was already right.
+ */
+test.describe("render baselines below lg", () => {
+  test.use({ viewport: { width: 430, height: 900 } });
+
+  test("the builder on a phone", async ({ page }) => {
+    await page.goto("/build/frosting");
+    await settle(page);
+    await expect(page).toHaveScreenshot("builder-phone.png", { maxDiffPixelRatio: 0.02 });
+  });
+});
